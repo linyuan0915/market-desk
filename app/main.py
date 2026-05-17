@@ -55,10 +55,12 @@ INDEX_META = [
     {"code": "000688", "name": "科创50", "db_code": "000688.SS"},
 ]
 DEFAULT_WATCHLIST = [
-    {"code": "600519", "name": "贵州茅台", "category": "核心资产"},
-    {"code": "000001", "name": "平安银行", "category": "金融地产"},
     {"code": "300750", "name": "宁德时代", "category": "新能源"},
-    {"code": "601318", "name": "中国平安", "category": "金融地产"},
+    {"code": "603986", "name": "兆易创新", "category": "科技成长"},
+    {"code": "300394", "name": "天孚通信", "category": "科技成长"},
+    {"code": "001393", "name": "N维通利", "category": "新股观察"},
+    {"code": "603333", "name": "尚纬股份", "category": "交易观察"},
+    {"code": "603897", "name": "长城科技", "category": "交易观察"},
 ]
 DEFAULT_WATCHLIST_CATEGORY = "未分类"
 DATA_REFRESH_BATCH_SIZE = 5
@@ -194,7 +196,19 @@ def status() -> dict:
 def market_breadth_data() -> JSONResponse:
     aggregated = OUTPUT_DIR / "aggregated_data.json"
     if not aggregated.exists():
-        return JSONResponse({"categories": [], "dates": [], "data": {}, "stats": None, "commentary": None})
+        return JSONResponse(
+            {
+                "categories": [],
+                "dates": [],
+                "data": {},
+                "stats": None,
+                "commentary": {
+                    "conclusion": "市场宽度数据暂不可用。",
+                    "analysis": ["云端暂未包含本地 market-breadth skill 生成文件。当前模块需要先在本地生成 output/aggregated_data.json，或后续改为云端可调用的数据源。"],
+                },
+                "children": {},
+            }
+        )
     with aggregated.open(encoding="utf-8") as file:
         payload = json.load(file)
     stats = _breadth_stats(aggregated)
@@ -207,10 +221,13 @@ def market_breadth_data() -> JSONResponse:
 @app.post("/api/refresh")
 def refresh(request: Request) -> dict:
     _require_auth(request)
-    result = generate_heatmap()
-    _cache_delete_prefix("market-breadth")
-    _cache_delete_prefix("desk")
-    return {**result, **status()}
+    try:
+        result = generate_heatmap()
+        _cache_delete_prefix("market-breadth")
+        _cache_delete_prefix("desk")
+        return {**result, **status()}
+    except Exception as error:
+        return {**status(), "ok": False, "message": f"市场宽度刷新暂不可用：{error}"}
 
 
 @app.get("/api/daily-brief/status")
@@ -390,7 +407,7 @@ def stock_detail(code: str) -> JSONResponse:
 @app.get("/api/data-center")
 def data_center(request: Request, refresh: bool = False) -> JSONResponse:
     _require_auth_for_refresh(request, refresh)
-    return JSONResponse(_cached_payload("data-center", _data_center_payload, refresh=refresh))
+    return JSONResponse(_cached_payload("data-center", _safe_data_center_payload, refresh=refresh))
 
 
 @app.post("/api/data-refresh")
@@ -422,7 +439,7 @@ def desk_card(key: str, request: Request, refresh: bool = False) -> JSONResponse
 @app.get("/api/cross-market-risk")
 def cross_market_risk(request: Request, refresh: bool = False) -> JSONResponse:
     _require_auth_for_refresh(request, refresh)
-    return JSONResponse(_cached_payload("cross-market-risk", _cross_market_risk_payload, refresh=refresh))
+    return JSONResponse(_cached_payload("cross-market-risk", _safe_cross_market_risk_payload, refresh=refresh))
 
 
 @app.get("/api/sector-funds")
@@ -1120,6 +1137,24 @@ def _data_center_payload() -> dict:
     }
 
 
+def _safe_data_center_payload() -> dict:
+    try:
+        return _data_center_payload()
+    except Exception as error:
+        return {
+            "available": False,
+            "source": f"MySQL/{MARKET_DATA_DB}.daily_data",
+            "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+            "message": f"数据中心诊断失败：{error}",
+            "coverage": {"rows_count": 0, "code_count": 0, "market_count": 0, "min_date": None, "max_date": None},
+            "markets": [],
+            "quality": [],
+            "recent_calendar": [],
+            "sparse_symbols": [],
+            "suggestions": ["请确认云端 daily_data 表结构已更新，并在登录后执行“一键更新数据”。"],
+        }
+
+
 def _morning_desk_payload() -> dict:
     generated_at = datetime.now(TZ).isoformat(timespec="seconds")
     cross = _cross_market_risk_payload()
@@ -1165,7 +1200,7 @@ def _morning_desk_payload() -> dict:
 
 def _desk_card_payload(key: str) -> dict:
     if key == "cross":
-        return _desk_card_cross(_cross_market_risk_payload())
+        return _desk_card_cross(_safe_cross_market_risk_payload())
     if key == "sentiment":
         try:
             return _desk_card_sentiment(_market_sentiment_payload())
@@ -1185,7 +1220,7 @@ def _desk_card_payload(key: str) -> dict:
             "key": "freshness",
             "title": "数据新鲜度",
             "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
-            "data_freshness": _desk_data_freshness(_data_center_payload()),
+            "data_freshness": _desk_data_freshness(_safe_data_center_payload()),
         }
     raise HTTPException(status_code=404, detail="未知驾驶舱分块。")
 
@@ -1348,6 +1383,25 @@ def _cross_market_risk_payload() -> dict:
         "histories": history_by_code,
         "summary": _cross_market_summary(risk, latest),
     }
+
+
+def _safe_cross_market_risk_payload() -> dict:
+    try:
+        return _cross_market_risk_payload()
+    except Exception as error:
+        return {
+            "available": False,
+            "source": f"MySQL/{MARKET_DATA_DB}.daily_data",
+            "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+            "trade_date": None,
+            "risk": {"score": None, "state": "风险面板暂不可用"},
+            "items": [],
+            "histories": {},
+            "summary": {
+                "conclusion": "跨市场风险暂不可用。",
+                "analysis": [f"读取云端 SQL 时发生异常：{error}", "请确认 daily_data 表已创建，并登录后点击“一键更新数据”。"],
+            },
+        }
 
 
 def _sector_funds_payload(kind: str) -> dict:

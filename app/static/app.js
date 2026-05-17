@@ -151,20 +151,18 @@ async function refreshData() {
 async function pollRefreshJob(jobId) {
   window.clearTimeout(state.refreshJobTimer);
   try {
-    const response = await fetch(`/api/data-refresh/${jobId}`);
+    const response = await authFetch(`/api/data-refresh/${jobId}`);
     if (!response.ok) throw new Error(await response.text());
     const job = await response.json();
     renderRefreshJob(job);
     if (job.status === "completed" || job.status === "completed_with_warnings" || job.status === "failed") {
       refreshDataBtn.disabled = false;
       refreshDataBtn.textContent = "一键更新数据";
-      if (job.status !== "failed") {
-        clearDataCache();
-        if (state.view === "desk") await loadDesk(true);
-        if (state.view === "dataCenter") await loadDataCenter(true);
-        if (state.view === "crossMarket") await loadCrossMarket(true);
-        showNotice(job.message || "数据更新完成。", job.status === "completed_with_warnings");
-      }
+      clearDataCache();
+      if (state.view === "desk") await loadDesk(job.status !== "failed");
+      if (state.view === "dataCenter") await loadDataCenter(job.status !== "failed");
+      if (state.view === "crossMarket") await loadCrossMarket(job.status !== "failed");
+      showNotice(job.message || "数据更新任务结束。", job.status !== "completed");
       return;
     }
     state.refreshJobTimer = window.setTimeout(() => pollRefreshJob(jobId), 1200);
@@ -1198,6 +1196,12 @@ async function refresh() {
   try {
     const response = await authFetch("/api/refresh", { method: "POST" });
     if (!response.ok) throw new Error(await response.text());
+    const result = await response.json();
+    if (result.ok === false) {
+      await loadAll();
+      showNotice(result.message || "市场宽度刷新暂不可用。", true);
+      return;
+    }
     delete state.cache["market-breadth"];
     await loadAll();
     showNotice("");

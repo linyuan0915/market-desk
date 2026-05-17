@@ -13,7 +13,10 @@ venv/
 env/
 node_modules/
 
-output/
+output/*
+!output/market_breadth_heatmap.png
+!output/raw_data.json
+!output/aggregated_data.json
 *.db
 *.sqlite
 *.sqlite3

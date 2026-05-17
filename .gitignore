@@ -26,11 +26,14 @@ node_modules/
 
 # Generated runtime outputs
 output/
-output/*.png
-output/*.html
-output/raw_data.json
-output/aggregated_data.json
-output/sentiment_history.json
+!output/
+!output/market_breadth_heatmap.png
+!output/raw_data.json
+!output/aggregated_data.json
+output/*
+!output/market_breadth_heatmap.png
+!output/raw_data.json
+!output/aggregated_data.json
 
 # OS/editor
 .DS_Store
