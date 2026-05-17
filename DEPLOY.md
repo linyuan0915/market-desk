@@ -25,7 +25,7 @@
 
 - `RSSCAST_MCP_TOKEN`：RssCast MCP token。
 - `MARKET_DB_HOST` / `MARKET_DB_PORT` / `MARKET_DB_USER` / `MARKET_DB_PASSWORD` / `MARKET_DATA_DB`：云 MySQL 连接信息。
-- `APP_PASSWORD`：网页触发刷新、生成简报、修改自选池时需要的访问密码。本地不配置时默认免登录。
+- `APP_PASSWORD`：自选池添加/删除的管理密码。本地不配置时默认免登录；公开站点的查看、刷新、生成和数据更新不需要登录。
 - `APP_SESSION_SECRET`：登录 cookie 签名密钥，建议使用长随机字符串。
 - `APP_COOKIE_SECURE=1`：HTTPS 部署时开启安全 cookie。
 - `API_CACHE_TTL_SECONDS=900`：接口缓存时间，默认 15 分钟。
@@ -101,7 +101,7 @@ server {
 - 首页驾驶舱已拆成分块异步加载：外围风险、市场情绪、资金主线、宏观压力、自选异动和数据新鲜度互不阻塞。
 - 重接口有服务端缓存和前端页面缓存：切换模块优先展示上次结果，点击模块内刷新按钮才强制更新。
 - 数据更新接口已改成后台任务：`POST /api/data-refresh` 创建任务，`GET /api/data-refresh/{job_id}` 查询进度。
-- 设置 `APP_PASSWORD` 后，强制刷新、数据更新、生成简报和修改自选池会要求登录，避免公开网站被随意触发更新。
+- 设置 `APP_PASSWORD` 后，只有自选池添加/删除需要输入密码；查看、刷新、生成简报和数据更新保持公开可用。
 
 ## 上线检查
 

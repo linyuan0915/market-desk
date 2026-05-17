@@ -220,7 +220,6 @@ def market_breadth_data() -> JSONResponse:
 
 @app.post("/api/refresh")
 def refresh(request: Request) -> dict:
-    _require_auth(request)
     try:
         result = generate_heatmap()
         _cache_delete_prefix("market-breadth")
@@ -246,7 +245,6 @@ def daily_brief_status() -> JSONResponse:
 
 @app.post("/api/daily-brief/generate")
 def generate_daily_brief(request: Request) -> JSONResponse:
-    _require_auth(request)
     if not DAILY_BRIEF_BUILD_SCRIPT.exists():
         return JSONResponse(
             {
@@ -288,7 +286,6 @@ def download_daily_brief() -> FileResponse:
 
 @app.get("/api/a-share/indices")
 def a_share_indices(request: Request, refresh: bool = False) -> JSONResponse:
-    _require_auth_for_refresh(request, refresh)
     return JSONResponse(_cached_payload("a-share-indices", _a_share_indices_payload, refresh=refresh))
 
 
@@ -317,7 +314,6 @@ def _a_share_indices_payload() -> dict:
 
 @app.get("/api/market-sentiment")
 def market_sentiment(request: Request, refresh: bool = False) -> JSONResponse:
-    _require_auth_for_refresh(request, refresh)
     return JSONResponse(_cached_payload("market-sentiment", _market_sentiment_payload, refresh=refresh))
 
 
@@ -343,7 +339,6 @@ def _market_sentiment_payload() -> dict:
 
 @app.get("/api/watchlist")
 def get_watchlist(request: Request, refresh: bool = False) -> JSONResponse:
-    _require_auth_for_refresh(request, refresh)
     return JSONResponse(_cached_payload("watchlist", lambda: _watchlist_payload(_load_watchlist()), refresh=refresh))
 
 
@@ -406,13 +401,11 @@ def stock_detail(code: str) -> JSONResponse:
 
 @app.get("/api/data-center")
 def data_center(request: Request, refresh: bool = False) -> JSONResponse:
-    _require_auth_for_refresh(request, refresh)
     return JSONResponse(_cached_payload("data-center", _safe_data_center_payload, refresh=refresh))
 
 
 @app.post("/api/data-refresh")
 def data_refresh(request: Request) -> JSONResponse:
-    _require_auth(request)
     return JSONResponse(_start_data_refresh_job())
 
 
@@ -426,37 +419,31 @@ def data_refresh_job(job_id: str) -> JSONResponse:
 
 @app.get("/api/desk")
 def morning_desk(request: Request, refresh: bool = False) -> JSONResponse:
-    _require_auth_for_refresh(request, refresh)
     return JSONResponse(_cached_payload("desk", _morning_desk_payload, refresh=refresh))
 
 
 @app.get("/api/desk-card/{key}")
 def desk_card(key: str, request: Request, refresh: bool = False) -> JSONResponse:
-    _require_auth_for_refresh(request, refresh)
     return JSONResponse(_cached_payload(f"desk-card:{key}", lambda: _desk_card_payload(key), refresh=refresh))
 
 
 @app.get("/api/cross-market-risk")
 def cross_market_risk(request: Request, refresh: bool = False) -> JSONResponse:
-    _require_auth_for_refresh(request, refresh)
     return JSONResponse(_cached_payload("cross-market-risk", _safe_cross_market_risk_payload, refresh=refresh))
 
 
 @app.get("/api/sector-funds")
 def sector_funds(request: Request, kind: str = "industry", refresh: bool = False) -> JSONResponse:
-    _require_auth_for_refresh(request, refresh)
     return JSONResponse(_cached_payload(f"sector-funds:{kind}", lambda: _sector_funds_payload(kind), refresh=refresh))
 
 
 @app.get("/api/fund-mainline")
 def fund_mainline(request: Request, kind: str = "industry", refresh: bool = False) -> JSONResponse:
-    _require_auth_for_refresh(request, refresh)
     return JSONResponse(_cached_payload(f"fund-mainline:{kind}", lambda: _fund_mainline_payload(kind), refresh=refresh))
 
 
 @app.get("/api/macro-commodities")
 def macro_commodities(request: Request, refresh: bool = False) -> JSONResponse:
-    _require_auth_for_refresh(request, refresh)
     return JSONResponse(_cached_payload("macro-commodities", _macro_commodities_payload, refresh=refresh))
 
 
