@@ -63,6 +63,11 @@ button:disabled {
   opacity: 0.55;
 }
 
+.button.disabled {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
 .primary {
   background: linear-gradient(180deg, #2f6df3, var(--blue-2));
   color: #fff;

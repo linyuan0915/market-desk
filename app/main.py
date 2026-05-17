@@ -233,27 +233,14 @@ def refresh(request: Request) -> dict:
 def daily_brief_status() -> JSONResponse:
     docx_path = _latest_daily_brief_docx()
     if not docx_path:
-        return JSONResponse(
-            {
-                "exists": False,
-                "message": "未找到每日行情简报 Word 输出。",
-                "skill": str(DAILY_BRIEF_SKILL_DIR),
-            }
-        )
+        return JSONResponse(_fallback_daily_brief_payload(generated=False))
     return JSONResponse(_daily_brief_payload(docx_path))
 
 
 @app.post("/api/daily-brief/generate")
 def generate_daily_brief(request: Request) -> JSONResponse:
     if not DAILY_BRIEF_BUILD_SCRIPT.exists():
-        return JSONResponse(
-            {
-                "ok": False,
-                "message": f"未找到每日简报构建脚本: {DAILY_BRIEF_BUILD_SCRIPT}",
-                "skill": str(DAILY_BRIEF_SKILL_DIR),
-            },
-            status_code=500,
-        )
+        return JSONResponse(_fallback_daily_brief_payload(generated=True))
     completed = subprocess.run(
         ["python3", str(DAILY_BRIEF_BUILD_SCRIPT)],
         cwd=DAILY_BRIEF_DIR,
@@ -2744,6 +2731,70 @@ def _daily_brief_payload(docx_path: Path) -> dict:
         "download_url": "/api/daily-brief/download",
         "generated_at": datetime.fromtimestamp(docx_path.stat().st_mtime, TZ).isoformat(timespec="seconds"),
         "skill": str(DAILY_BRIEF_SKILL_DIR),
+    }
+
+
+def _fallback_daily_brief_payload(generated: bool = False) -> dict:
+    generated_at = datetime.now(TZ).isoformat(timespec="seconds")
+    sections = []
+    notes = []
+
+    def paragraph(text: str) -> dict:
+        return {"type": "paragraph", "text": text, "style": "Normal"}
+
+    try:
+        data_center = _safe_data_center_payload()
+        coverage = data_center.get("coverage") or {}
+        notes.append(
+            f"本地云端库当前覆盖 {coverage.get('market_count', 0)} 类市场、{coverage.get('code_count', 0)} 个标的、{coverage.get('rows_count', 0)} 行，最新日期 {coverage.get('max_date') or '-'}。"
+        )
+    except Exception as error:
+        notes.append(f"数据中心暂不可用：{error}")
+
+    try:
+        cross = _safe_cross_market_risk_payload()
+        notes.append((cross.get("summary") or {}).get("conclusion") or "跨市场风险暂无结论。")
+    except Exception as error:
+        notes.append(f"跨市场风险暂不可用：{error}")
+
+    try:
+        macro = _macro_commodities_payload()
+        notes.append((macro.get("summary") or {}).get("conclusion") or "宏观商品暂无结论。")
+    except Exception as error:
+        notes.append(f"宏观商品暂不可用：{error}")
+
+    try:
+        funds = _fund_mainline_payload("industry")
+        notes.append((funds.get("summary") or {}).get("conclusion") or "行业资金主线暂无结论。")
+    except Exception as error:
+        notes.append(f"资金主线暂不可用：{error}")
+
+    sections.append(
+        {
+            "heading": "市场简报",
+            "blocks": [paragraph("结论：" + (notes[0] if notes else "当前数据仍在准备中。")), *[paragraph(item) for item in notes[1:]]],
+        }
+    )
+    sections.append(
+        {
+            "heading": "说明",
+            "blocks": [
+                paragraph("云端未挂载本机 daily-market-brief skill，当前简报由网页已有行情接口自动生成。"),
+                paragraph("如需 Word 版深度简报，需要后续把 daily-market-brief skill 一并打包进云端镜像。"),
+            ],
+        }
+    )
+    return {
+        "ok": True,
+        "exists": True,
+        "title": "每日行情简报",
+        "subtitle": f"生成时间 {generated_at[:10]}",
+        "sections": sections,
+        "docx_path": None,
+        "download_url": None,
+        "generated_at": generated_at,
+        "skill": "cloud fallback brief",
+        "message": "已使用云端 fallback 生成网页简报。" if generated else "暂无 Word 简报，当前显示云端 fallback 简报。",
     }
 
 

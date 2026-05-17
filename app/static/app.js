@@ -509,7 +509,16 @@ function renderDailyBrief(data) {
   document.getElementById("briefSubtitle").textContent = data.subtitle || (data.exists ? "市场行情简报" : "暂无简报");
   document.getElementById("briefGeneratedAt").textContent = data.generated_at || "-";
   document.getElementById("briefSkill").textContent = data.skill || "-";
-  document.getElementById("downloadBriefBtn").href = data.download_url || "/api/daily-brief/download";
+  const downloadBriefBtn = document.getElementById("downloadBriefBtn");
+  if (data.download_url) {
+    downloadBriefBtn.href = data.download_url;
+    downloadBriefBtn.classList.remove("disabled");
+    downloadBriefBtn.textContent = "下载 Word";
+  } else {
+    downloadBriefBtn.removeAttribute("href");
+    downloadBriefBtn.classList.add("disabled");
+    downloadBriefBtn.textContent = "暂无 Word";
+  }
   document.getElementById("statusLabelA").textContent = "简报日期";
   document.getElementById("statusLabelB").textContent = "内容板块";
   document.getElementById("statusLabelC").textContent = "更新时间";
