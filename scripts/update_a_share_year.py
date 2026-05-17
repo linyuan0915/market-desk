@@ -136,15 +136,16 @@ def upsert_rows(connection, rows: list[dict], suffix_map: dict[str, str], name_m
         )
     if not values:
         return 0
+    change_column = daily_data_change_column(connection)
     with connection.cursor() as cursor:
         cursor.executemany(
-            """
-            INSERT INTO daily_data (date, code, name, market, close, `change`, change_pct, volume, amount)
+            f"""
+            INSERT INTO daily_data (date, code, name, market, close, {change_column}, change_pct, volume, amount)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 name = VALUES(name),
                 close = VALUES(close),
-                `change` = VALUES(`change`),
+                {change_column} = VALUES({change_column}),
                 change_pct = VALUES(change_pct),
                 volume = VALUES(volume),
                 amount = VALUES(amount)
@@ -153,6 +154,24 @@ def upsert_rows(connection, rows: list[dict], suffix_map: dict[str, str], name_m
         )
     connection.commit()
     return len(values)
+
+
+def daily_data_change_column(connection) -> str:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'daily_data'
+              AND COLUMN_NAME IN ('change_amount', 'change')
+            ORDER BY FIELD(COLUMN_NAME, 'change_amount', 'change')
+            LIMIT 1
+            """
+        )
+        row = cursor.fetchone()
+    column = row[0] if row else None
+    return "change_amount" if column == "change_amount" else "`change`"
 
 
 if __name__ == "__main__":

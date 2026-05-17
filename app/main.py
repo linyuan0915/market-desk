@@ -944,6 +944,7 @@ def _yahoo_chart_rows(item: dict, start_date: date, end_date: date) -> list[dict
 
 
 def _upsert_market_rows(connection, rows: list[dict]) -> int:
+    change_column = _daily_data_change_column(connection)
     values = [
         (
             row.get("date"),
@@ -951,7 +952,7 @@ def _upsert_market_rows(connection, rows: list[dict]) -> int:
             row.get("name"),
             row.get("market"),
             row.get("close"),
-            row.get("change"),
+            row.get("change_amount", row.get("change")),
             row.get("change_pct"),
             row.get("volume"),
             row.get("amount"),
@@ -963,14 +964,14 @@ def _upsert_market_rows(connection, rows: list[dict]) -> int:
         return 0
     with connection.cursor() as cursor:
         cursor.executemany(
-            """
-            INSERT INTO daily_data (date, code, name, market, close, `change`, change_pct, volume, amount)
+            f"""
+            INSERT INTO daily_data (date, code, name, market, close, {change_column}, change_pct, volume, amount)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 name = VALUES(name),
                 market = VALUES(market),
                 close = VALUES(close),
-                `change` = VALUES(`change`),
+                {change_column} = VALUES({change_column}),
                 change_pct = VALUES(change_pct),
                 volume = VALUES(volume),
                 amount = VALUES(amount)
@@ -979,6 +980,24 @@ def _upsert_market_rows(connection, rows: list[dict]) -> int:
         )
     connection.commit()
     return len(values)
+
+
+def _daily_data_change_column(connection) -> str:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'daily_data'
+              AND COLUMN_NAME IN ('change_amount', 'change')
+            ORDER BY FIELD(COLUMN_NAME, 'change_amount', 'change')
+            LIMIT 1
+            """
+        )
+        row = cursor.fetchone() or {}
+    column = row.get("COLUMN_NAME") if isinstance(row, dict) else row[0] if row else None
+    return "change_amount" if column == "change_amount" else "`change`"
 
 
 def _sql_coverage_snapshot(connection) -> dict:

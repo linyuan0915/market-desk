@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS daily_data (
   name VARCHAR(128) NOT NULL,
   market VARCHAR(32) NOT NULL,
   close DECIMAL(20, 6) NULL,
-  `change` DECIMAL(20, 6) NULL,
+  change_amount DECIMAL(20, 6) NULL,
   change_pct DECIMAL(20, 6) NULL,
   volume DECIMAL(28, 4) NULL,
   amount DECIMAL(28, 4) NULL,
