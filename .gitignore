@@ -21,6 +21,7 @@ node_modules/
 *.sqlite
 *.sqlite3
 *.sql
+!sql/schema.sql
 *.dump
 
 # Generated runtime outputs

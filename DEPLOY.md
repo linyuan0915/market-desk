@@ -17,6 +17,7 @@
 - `.dockerignore`：不把本地缓存、依赖、数据库、输出图片打进镜像。
 - `render.yaml`：Render Blueprint 示例。
 - `.env.example`：本地和云端环境变量模板。
+- `sql/schema.sql`：云 MySQL 初始化表结构。
 
 ## 环境变量
 
@@ -34,13 +35,15 @@
 云端必须有可访问的 MySQL，并包含 `market_data.daily_data` 表。推荐流程：
 
 1. 在云 MySQL 创建数据库 `market_data`。
-2. 从本机导出表结构和必要历史数据。
-3. 导入云 MySQL。
-4. 用部署平台的环境变量把连接信息填进去。
+2. 执行 `sql/schema.sql` 初始化 `daily_data` 表。
+3. 从本机导出必要历史数据。
+4. 导入云 MySQL。
+5. 用部署平台的环境变量把连接信息填进去。
 
 示例命令：
 
 ```bash
+mysql -h <cloud-host> -u <cloud-user> -p < sql/schema.sql
 mysqldump -h 127.0.0.1 -u root market_data daily_data > market_data_daily_data.sql
 mysql -h <cloud-host> -u <cloud-user> -p market_data < market_data_daily_data.sql
 ```
@@ -105,7 +108,8 @@ server {
 上线后依次检查：
 
 1. 访问首页，确认静态页面正常打开。
-2. 打开 `/api/auth/status`，确认 `enabled` 为 `true`。
-3. 点击“一键更新数据”，确认登录后能启动后台任务。
-4. 打开“本地数据中心”，确认云 MySQL 读写日期、标的数量正常。
-5. 打开“早盘驾驶舱”，确认分块异步加载完成。
+2. 打开 `/api/health`，确认 `ok` 为 `true`，数据库连接正常。
+3. 打开 `/api/auth/status`，确认 `enabled` 为 `true`。
+4. 点击“一键更新数据”，确认登录后能启动后台任务。
+5. 打开“本地数据中心”，确认云 MySQL 读写日期、标的数量正常。
+6. 打开“早盘驾驶舱”，确认分块异步加载完成。

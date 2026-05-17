@@ -123,6 +123,29 @@ def auth_status(request: Request) -> dict:
     return {"enabled": _auth_enabled(), "authenticated": _is_authenticated(request)}
 
 
+@app.get("/api/health")
+def health() -> dict:
+    database = {"ok": False, "message": "unchecked"}
+    try:
+        connection = _market_db_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1 AS ok")
+                cursor.fetchone()
+            database = {"ok": True, "message": "connected"}
+        finally:
+            connection.close()
+    except Exception as error:
+        database = {"ok": False, "message": str(error)}
+    return {
+        "ok": database["ok"],
+        "app": "market-desk",
+        "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+        "database": database,
+        "auth_enabled": _auth_enabled(),
+    }
+
+
 @app.post("/api/login")
 def login(response: Response, payload: dict = Body(...)) -> dict:
     if not _auth_enabled():
