@@ -101,6 +101,8 @@ DATA_REFRESH_JOBS: dict[str, dict] = {}
 DATA_REFRESH_LOCK = threading.Lock()
 
 app = FastAPI(title="市场宽度鱼盆热力图")
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
 

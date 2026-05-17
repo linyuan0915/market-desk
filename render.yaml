@@ -4,6 +4,7 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile
     autoDeploy: true
+    healthCheckPath: /api/health
     envVars:
       - key: RSSCAST_MCP_TOKEN
         sync: false
