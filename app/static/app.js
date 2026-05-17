@@ -44,7 +44,7 @@ async function fetchJson(url, options = {}) {
   const force = Boolean(options.force);
   const key = options.cacheKey || cacheKey(url);
   if (!force && state.cache[key]) return state.cache[key];
-  const response = await fetch(withRefresh(url, force), options.fetchOptions || {});
+  const response = await authFetch(withRefresh(url, force), options.fetchOptions || {});
   if (response.status === 401) {
     const authed = await promptLogin();
     if (authed) return fetchJson(url, options);
@@ -68,6 +68,14 @@ async function promptLogin() {
     return false;
   }
   return true;
+}
+
+async function authFetch(url, options = {}) {
+  const response = await fetch(url, options);
+  if (response.status !== 401) return response;
+  const authed = await promptLogin();
+  if (!authed) return response;
+  return fetch(url, options);
 }
 
 function clearDataCache() {
@@ -128,8 +136,7 @@ async function refreshData() {
   refreshDataBtn.textContent = "启动中";
   showNotice("正在启动后台数据更新任务，页面可以继续浏览。");
   try {
-    const response = await fetch("/api/data-refresh", { method: "POST" });
-    if (response.status === 401 && (await promptLogin())) return refreshData();
+    const response = await authFetch("/api/data-refresh", { method: "POST" });
     if (!response.ok) throw new Error(await response.text());
     const job = await response.json();
     renderRefreshJob(job);
@@ -1189,7 +1196,7 @@ async function refresh() {
   refreshBtn.textContent = "刷新中";
   showNotice("正在调用 market-breadth-heatmap skill 抓取数据并生成 PNG，同时更新交互式热力图...");
   try {
-    const response = await fetch("/api/refresh", { method: "POST" });
+    const response = await authFetch("/api/refresh", { method: "POST" });
     if (!response.ok) throw new Error(await response.text());
     delete state.cache["market-breadth"];
     await loadAll();
@@ -1207,7 +1214,7 @@ async function generateBrief() {
   generateBriefBtn.textContent = "生成中";
   showNotice("正在调用 daily-market-brief skill 的本地工作流生成每日行情简报...");
   try {
-    const response = await fetch("/api/daily-brief/generate", { method: "POST" });
+    const response = await authFetch("/api/daily-brief/generate", { method: "POST" });
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
     renderDailyBrief(data);
@@ -1232,7 +1239,7 @@ async function addWatchItem(event) {
     return;
   }
   try {
-    const response = await fetch("/api/watchlist", {
+    const response = await authFetch("/api/watchlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1257,7 +1264,7 @@ async function addWatchItem(event) {
 
 async function removeWatchItem(code) {
   try {
-    const response = await fetch(`/api/watchlist/${code}`, { method: "DELETE" });
+    const response = await authFetch(`/api/watchlist/${code}`, { method: "DELETE" });
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
     delete state.cache["watchlist"];

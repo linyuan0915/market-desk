@@ -1082,6 +1082,14 @@ def _data_center_payload() -> dict:
     finally:
         connection.close()
 
+    coverage = _json_safe_row(coverage)
+    coverage = {
+        "rows_count": int(coverage.get("rows_count") or 0),
+        "code_count": int(coverage.get("code_count") or 0),
+        "market_count": int(coverage.get("market_count") or 0),
+        "min_date": coverage.get("min_date"),
+        "max_date": coverage.get("max_date"),
+    }
     quality = []
     for row in markets:
         days = _calendar_days(row.get("min_date"), row.get("max_date"))
@@ -1103,7 +1111,7 @@ def _data_center_payload() -> dict:
         "available": True,
         "source": f"MySQL/{MARKET_DATA_DB}.daily_data",
         "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
-        "coverage": _json_safe_row(coverage),
+        "coverage": coverage,
         "markets": [_json_safe_row(row) for row in markets],
         "quality": quality,
         "recent_calendar": [_json_safe_row(row) for row in recent],
@@ -1310,6 +1318,17 @@ def _cross_market_risk_payload() -> dict:
             rows = cursor.fetchall()
     finally:
         connection.close()
+    if not rows:
+        return {
+            "available": False,
+            "source": f"MySQL/{MARKET_DATA_DB}.daily_data",
+            "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+            "trade_date": None,
+            "risk": {"score": None, "state": "等待数据"},
+            "items": [],
+            "histories": {},
+            "summary": {"conclusion": "跨市场风险等待本地数据更新。", "analysis": ["云端数据库已连接，但 daily_data 暂无 A 股、港股、美股或 VIX 数据。请先登录后点击“一键更新数据”。"]},
+        }
     latest_by_code = {}
     history_by_code: dict[str, list[dict]] = {}
     for row in rows:
