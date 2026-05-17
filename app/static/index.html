@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>行情分析工作台</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">MD</div>
+          <div>
+            <strong>Market Desk</strong>
+            <span>A股行情分析</span>
+          </div>
+        </div>
+        <nav class="nav">
+          <span class="nav-group">工作流</span>
+          <button class="nav-item active" data-view="desk"><span>▣</span>早盘驾驶舱</button>
+          <button class="nav-item" data-view="daily"><span>◫</span>每日行情</button>
+          <button class="nav-item" data-view="watchlist"><span>◎</span>自选观察</button>
+          <span class="nav-group">市场状态</span>
+          <button class="nav-item" data-view="breadth"><span>▦</span>市场宽度</button>
+          <button class="nav-item" data-view="indices"><span>⌁</span>A股指数</button>
+          <button class="nav-item" data-view="sentiment"><span>◉</span>市场情绪</button>
+          <button class="nav-item" data-view="crossMarket"><span>△</span>跨市场风险</button>
+          <span class="nav-group">资金与数据</span>
+          <button class="nav-item" data-view="sectorFunds"><span>▥</span>板块资金热力图</button>
+          <button class="nav-item" data-view="macro"><span>◇</span>宏观商品</button>
+          <button class="nav-item" data-view="dataCenter"><span>□</span>本地数据中心</button>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="marketbar">
+          <div>
+            <h1 id="pageTitle">早盘驾驶舱</h1>
+            <p id="pageSubtitle">外围风险 · 情绪温度 · 资金主线 · 宏观压力 · 自选异动</p>
+          </div>
+          <button id="refreshDataBtn" class="primary">一键更新数据</button>
+          <div class="status-grid">
+            <div>
+              <span id="statusLabelA">交易日</span>
+              <strong id="latestDate">-</strong>
+            </div>
+            <div>
+              <span id="statusLabelB">全市场均值</span>
+              <strong id="avgValue">-</strong>
+            </div>
+            <div>
+              <span id="statusLabelC">更新时间</span>
+              <strong id="generatedAt">-</strong>
+            </div>
+          </div>
+        </header>
+
+        <section id="notice" class="notice hidden"></section>
+        <section id="refreshJobPanel" class="refresh-job hidden">
+          <div class="refresh-job-head">
+            <div>
+              <strong id="refreshJobTitle">数据更新</strong>
+              <span id="refreshJobMessage">-</span>
+            </div>
+            <em id="refreshJobPercent">0%</em>
+          </div>
+          <div class="refresh-progress"><div id="refreshProgressBar"></div></div>
+          <div id="refreshJobTasks" class="refresh-job-tasks"></div>
+        </section>
+
+        <section id="deskView" class="market-view view-panel">
+          <section class="desk-hero">
+            <div id="deskConclusion" class="sentiment-thesis"></div>
+            <div class="temperature-card">
+              <span>综合环境分</span>
+              <strong id="deskScore">-</strong>
+              <em id="deskState">-</em>
+              <div class="temperature-track">
+                <div id="deskNeedle"></div>
+              </div>
+            </div>
+          </section>
+          <div id="deskCards" class="desk-grid"></div>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>数据新鲜度</h2>
+                <p>本地 SQL 覆盖日期，点击“一键更新数据”会自动补齐近期缺口</p>
+              </div>
+            </div>
+            <div id="deskFreshness" class="freshness-grid"></div>
+          </section>
+        </section>
+
+        <section id="breadthView" class="content-grid view-panel hidden">
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>交互式热力图</h2>
+                <p id="rangeLabel">-</p>
+              </div>
+              <div class="actions">
+                <button id="refreshBtn" class="primary">刷新</button>
+                <button id="previewBtn">预览</button>
+                <button id="fullscreenBtn">全屏</button>
+                <a id="downloadBtn" class="button" href="/output/market_breadth_heatmap.png" download>下载 PNG</a>
+              </div>
+            </div>
+            <div class="commentary-card">
+              <span>每日市场简评</span>
+              <strong id="commentaryConclusion">-</strong>
+              <ul id="commentaryAnalysis"></ul>
+            </div>
+            <div id="interactiveHeatmap" class="heatmap-grid"></div>
+          </section>
+
+          <aside class="insights">
+            <div class="metric-card">
+              <span>最强行业</span>
+              <strong id="strongest">-</strong>
+            </div>
+            <div class="metric-card">
+              <span>最弱行业</span>
+              <strong id="weakest">-</strong>
+            </div>
+            <div class="metric-card">
+              <span>行业数量</span>
+              <strong id="categoryCount">-</strong>
+            </div>
+            <div class="list-card">
+              <h3>近 5 日相对改善</h3>
+              <ol id="improvedList"></ol>
+            </div>
+            <div class="list-card">
+              <h3>近 5 日走弱</h3>
+              <ol id="weakenedList"></ol>
+            </div>
+          </aside>
+        </section>
+
+        <section id="dailyView" class="daily-view view-panel hidden">
+          <div class="daily-toolbar">
+            <div>
+              <h2 id="briefTitle">每日行情</h2>
+              <p id="briefSubtitle">-</p>
+            </div>
+            <div class="actions">
+              <button id="generateBriefBtn" class="primary">生成简报</button>
+              <a id="downloadBriefBtn" class="button" href="/api/daily-brief/download">下载 Word</a>
+            </div>
+          </div>
+          <div class="brief-meta">
+            <div>
+              <span>更新时间</span>
+              <strong id="briefGeneratedAt">-</strong>
+            </div>
+            <div>
+              <span>来源 Skill</span>
+              <strong id="briefSkill">-</strong>
+            </div>
+          </div>
+          <article id="briefContent" class="brief-content"></article>
+        </section>
+
+        <section id="indicesView" class="market-view view-panel hidden">
+          <div class="daily-toolbar">
+            <div>
+              <h2>A股核心指数</h2>
+              <p id="indicesSubtitle">RssCast MCP · 收盘后日频行情</p>
+            </div>
+            <div class="actions">
+              <button id="refreshIndicesBtn" class="primary">刷新指数</button>
+            </div>
+          </div>
+          <div id="indexSummary" class="commentary-card"></div>
+          <div id="indexCards" class="quote-grid"></div>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>指数走势对比</h2>
+                <p>近 90 自然日交易数据 · 归一化观察强弱</p>
+              </div>
+            </div>
+            <div id="indexTrendList" class="trend-list"></div>
+          </section>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>行情明细</h2>
+                <p>字段来自 RssCast：open / high / low / close / volume / amount</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>指数</th>
+                    <th>最新</th>
+                    <th>涨跌幅</th>
+                    <th>涨跌额</th>
+                    <th>开盘</th>
+                    <th>最高</th>
+                    <th>最低</th>
+                    <th>成交额</th>
+                    <th>振幅</th>
+                  </tr>
+                </thead>
+                <tbody id="indexTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="watchlistView" class="market-view view-panel hidden">
+          <div class="daily-toolbar">
+            <div>
+              <h2>自选观察</h2>
+              <p>添加股票代码后，按收盘行情观察涨跌、量能和 MA20 状态</p>
+            </div>
+            <div class="actions">
+              <button id="refreshWatchlistBtn" class="primary">刷新自选</button>
+            </div>
+          </div>
+          <form id="watchlistForm" class="inline-form">
+            <label>
+              <span>代码</span>
+              <input id="watchCodeInput" inputmode="numeric" maxlength="6" placeholder="600519" />
+            </label>
+            <label>
+              <span>名称</span>
+              <input id="watchNameInput" placeholder="贵州茅台，可选" />
+            </label>
+            <label>
+              <span>分类</span>
+              <input id="watchCategoryInput" list="watchCategoryOptions" placeholder="核心资产" />
+              <datalist id="watchCategoryOptions"></datalist>
+            </label>
+            <button class="primary" type="submit">添加/更新</button>
+          </form>
+          <div id="watchSummary" class="commentary-card"></div>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>自选池</h2>
+                <p id="watchlistSubtitle">RssCast MCP · 批量查询</p>
+              </div>
+            </div>
+            <div id="watchCategoryTabs" class="category-tabs"></div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>股票</th>
+                    <th>分类</th>
+                    <th>最新</th>
+                    <th>涨跌幅</th>
+                    <th>成交额</th>
+                    <th>换手率</th>
+                    <th>振幅</th>
+                    <th>更新时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="watchTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2 id="stockDetailTitle">个股观察</h2>
+                <p id="stockDetailSubtitle">点击自选池中的“详情”查看近一年 K 线和技术信号</p>
+              </div>
+            </div>
+            <div id="stockSignals" class="signal-list"></div>
+            <div id="stockTrend" class="stock-trend"></div>
+          </section>
+        </section>
+
+        <section id="sentimentView" class="market-view view-panel hidden">
+          <div class="daily-toolbar">
+            <div>
+              <h2>市场情绪仪表盘</h2>
+              <p id="sentimentSubtitle">指数动能 · 市场宽度 · 量能 · 风格 · 自选股</p>
+            </div>
+            <div class="actions">
+              <button id="refreshSentimentBtn" class="primary">刷新情绪</button>
+            </div>
+          </div>
+          <section class="sentiment-hero">
+            <div class="temperature-card">
+              <span>A股情绪温度计</span>
+              <strong id="sentimentScore">-</strong>
+              <em id="sentimentLabel">-</em>
+              <div class="temperature-track">
+                <div id="sentimentNeedle"></div>
+              </div>
+            </div>
+            <div class="sentiment-thesis">
+              <span>交易状态</span>
+              <h2 id="sentimentTag">-</h2>
+              <p id="sentimentConclusion">-</p>
+            </div>
+            <div class="sentiment-alerts">
+              <span>P1 极值提醒</span>
+              <ul id="sentimentAlerts"></ul>
+            </div>
+          </section>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>五维情绪拆解</h2>
+                <p>分数越高代表风险偏好越强，权重按交易意义分配</p>
+              </div>
+            </div>
+            <div id="sentimentComponents" class="score-bars"></div>
+          </section>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>P1 情绪诊断</h2>
+                <p>涨跌停、资金流、北向/南向、行业拥挤度和极值状态</p>
+              </div>
+            </div>
+            <div id="sentimentP1Grid" class="p1-grid"></div>
+          </section>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>交易解释</h2>
+                <p>先判断交易状态，再解释驱动因素</p>
+              </div>
+            </div>
+            <ol id="sentimentAnalysis" class="analysis-list"></ol>
+          </section>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>情绪历史</h2>
+                <p id="sentimentHistorySubtitle">本地记录 · 为后续 P1 趋势分析和极值提醒保留数据</p>
+              </div>
+            </div>
+            <div id="sentimentHistory" class="sentiment-history"></div>
+          </section>
+        </section>
+
+        <section id="dataCenterView" class="market-view view-panel hidden">
+          <div class="daily-toolbar">
+            <div>
+              <h2>本地数据中心</h2>
+              <p id="dataCenterSubtitle">MySQL market_data · 数据覆盖与质量诊断</p>
+            </div>
+            <div class="actions">
+              <button id="refreshDataCenterBtn" class="primary">刷新诊断</button>
+            </div>
+          </div>
+          <div id="dataCenterSummary" class="commentary-card"></div>
+          <div id="dataQualityGrid" class="quote-grid"></div>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>市场分类覆盖</h2>
+                <p>按 SQL 表中 market 字段统计日期、标的和缺失字段</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>市场</th>
+                    <th>行数</th>
+                    <th>标的数</th>
+                    <th>最早日期</th>
+                    <th>最新日期</th>
+                    <th>缺失 close</th>
+                    <th>缺失涨跌幅</th>
+                    <th>缺失成交额</th>
+                  </tr>
+                </thead>
+                <tbody id="dataMarketTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="crossMarketView" class="market-view view-panel hidden">
+          <div class="daily-toolbar">
+            <div>
+              <h2>跨市场风险</h2>
+              <p id="crossMarketSubtitle">港股 · 美股 · 波动率 · A股开盘前外围环境</p>
+            </div>
+            <div class="actions">
+              <button id="refreshCrossMarketBtn" class="primary">刷新风险</button>
+            </div>
+          </div>
+          <section class="sentiment-hero">
+            <div class="temperature-card">
+              <span>外围风险分</span>
+              <strong id="crossRiskScore">-</strong>
+              <em id="crossRiskState">-</em>
+              <div class="temperature-track risk-track">
+                <div id="crossRiskNeedle"></div>
+              </div>
+            </div>
+            <div id="crossMarketSummary" class="sentiment-thesis"></div>
+            <div class="sentiment-alerts">
+              <span>风险信号</span>
+              <ul id="crossRiskSignals"></ul>
+            </div>
+          </section>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>外围市场明细</h2>
+                <p>来自本地 SQL 的港股、美股、波动率与 A 股指数数据</p>
+              </div>
+            </div>
+            <div id="crossMarketCards" class="quote-grid"></div>
+          </section>
+        </section>
+
+        <section id="sectorFundsView" class="market-view view-panel hidden">
+          <div class="daily-toolbar">
+            <div>
+              <h2>板块资金热力图</h2>
+              <p id="sectorFundsSubtitle">行业 · 概念 · 地域 · 只看主力资金净流向</p>
+            </div>
+            <div class="actions">
+              <button class="fund-tab active" data-fund-kind="industry">行业</button>
+              <button class="fund-tab" data-fund-kind="concept">概念</button>
+              <button class="fund-tab" data-fund-kind="region">地域</button>
+              <button class="fund-tab" data-fund-kind="style">风格</button>
+              <button id="refreshSectorFundsBtn" class="primary">刷新资金</button>
+            </div>
+          </div>
+          <div id="sectorFundsSummary" class="commentary-card"></div>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>主力资金热力图</h2>
+                <p>面积按主力净额绝对值，红色净流入，绿色净流出</p>
+              </div>
+            </div>
+            <div id="sectorFundTreemap" class="fund-treemap"></div>
+          </section>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>资金排名</h2>
+                <p>展示主力净额、净占比和板块涨跌幅</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>板块</th>
+                    <th>主力净额</th>
+                    <th>净占比</th>
+                    <th>涨跌幅</th>
+                  </tr>
+                </thead>
+                <tbody id="sectorFundTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>资金主线追踪</h2>
+                <p>行业/概念连续 3 日、5 日主力净流入观察</p>
+              </div>
+              <div class="actions">
+                <button id="refreshFundMainlineBtn">刷新主线</button>
+              </div>
+            </div>
+            <div id="fundMainlineSummary" class="commentary-card"></div>
+            <div id="fundMainlineList" class="mainline-list"></div>
+          </section>
+        </section>
+
+        <section id="macroView" class="market-view view-panel hidden">
+          <div class="daily-toolbar">
+            <div>
+              <h2>宏观商品</h2>
+              <p id="macroSubtitle">美元 · 美债 · 人民币 · 黄金 · 原油 · 铜 · 黑色商品</p>
+            </div>
+            <div class="actions">
+              <button id="refreshMacroBtn" class="primary">刷新宏观商品</button>
+            </div>
+          </div>
+          <div id="macroSummary" class="commentary-card"></div>
+          <div id="macroCards" class="quote-grid"></div>
+          <section class="main-panel">
+            <div class="panel-head">
+              <div>
+                <h2>宏观商品明细</h2>
+                <p>可用则展示实时/日频值，不可用则显示来源错误</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>分组</th>
+                    <th>指标</th>
+                    <th>数值</th>
+                    <th>变化</th>
+                    <th>日期/频率</th>
+                    <th>状态</th>
+                    <th>来源</th>
+                  </tr>
+                </thead>
+                <tbody id="macroTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div id="modal" class="modal hidden">
+      <button id="closeModal" class="modal-close">关闭</button>
+      <img id="modalImage" alt="全屏热力图" />
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

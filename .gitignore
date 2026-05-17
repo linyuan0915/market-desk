@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and local dependencies
+.venv/
+venv/
+env/
+node_modules/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases and dumps
+*.db
+*.sqlite
+*.sqlite3
+*.sql
+*.dump
+
+# Generated runtime outputs
+output/
+output/*.png
+output/*.html
+output/raw_data.json
+output/aggregated_data.json
+output/sentiment_history.json
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

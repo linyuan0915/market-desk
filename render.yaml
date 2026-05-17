@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: market-desk
+    env: docker
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    envVars:
+      - key: RSSCAST_MCP_TOKEN
+        sync: false
+      - key: MARKET_DB_HOST
+        sync: false
+      - key: MARKET_DB_PORT
+        value: "3306"
+      - key: MARKET_DB_USER
+        sync: false
+      - key: MARKET_DB_PASSWORD
+        sync: false
+      - key: MARKET_DATA_DB
+        value: market_data
+      - key: APP_PASSWORD
+        sync: false
+      - key: APP_SESSION_SECRET
+        sync: false
+      - key: APP_COOKIE_SECURE
+        value: "1"
+      - key: API_CACHE_TTL_SECONDS
+        value: "900"
