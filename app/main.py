@@ -115,6 +115,7 @@ def startup() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     if not (OUTPUT_DIR / "market_breadth_heatmap.png").exists() and (ROOT_DIR / "market_breadth_heatmap.png").exists():
         shutil.copy2(ROOT_DIR / "market_breadth_heatmap.png", OUTPUT_DIR / "market_breadth_heatmap.png")
+    _ensure_market_schema()
 
 
 @app.get("/")
@@ -131,12 +132,20 @@ def auth_status(request: Request) -> dict:
 def health() -> dict:
     database = {"ok": False, "message": "unchecked"}
     try:
+        _ensure_market_schema()
         connection = _market_db_connection()
         try:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT 1 AS ok")
-                cursor.fetchone()
-            database = {"ok": True, "message": "connected"}
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) AS table_count
+                    FROM information_schema.tables
+                    WHERE table_schema = %s AND table_name = 'daily_data'
+                    """,
+                    (MARKET_DATA_DB,),
+                )
+                row = cursor.fetchone() or {}
+            database = {"ok": True, "message": "connected", "daily_data_table": bool(row.get("table_count"))}
         finally:
             connection.close()
     except Exception as error:
@@ -657,23 +666,74 @@ def _rsscast_call(tool: str, arguments: dict) -> list[dict]:
     return json.loads(text)
 
 
-def _market_db_connection():
+def _mysql_identifier(name: str) -> str:
+    if not name or not all(char.isalnum() or char == "_" for char in name):
+        raise RuntimeError(f"不安全的 MySQL 标识符：{name}")
+    return f"`{name}`"
+
+
+def _mysql_connection(database: str | None = MARKET_DATA_DB):
     import pymysql
 
-    return pymysql.connect(
+    kwargs = dict(
         host=os.environ.get("MARKET_DB_HOST", "127.0.0.1"),
         port=int(os.environ.get("MARKET_DB_PORT", "3306")),
         user=os.environ.get("MARKET_DB_USER", "root"),
         password=os.environ.get("MARKET_DB_PASSWORD", ""),
-        database=MARKET_DATA_DB,
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
     )
+    if database:
+        kwargs["database"] = database
+    return pymysql.connect(**kwargs)
+
+
+def _market_db_connection():
+    return _mysql_connection(MARKET_DATA_DB)
+
+
+def _ensure_market_schema() -> None:
+    try:
+        database_name = _mysql_identifier(MARKET_DATA_DB)
+        connection = _mysql_connection(None)
+    except Exception:
+        return
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"CREATE DATABASE IF NOT EXISTS {database_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+            )
+            cursor.execute(f"USE {database_name}")
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS daily_data (
+                  date DATE NOT NULL,
+                  code VARCHAR(32) NOT NULL,
+                  name VARCHAR(128) NOT NULL,
+                  market VARCHAR(32) NOT NULL,
+                  close DECIMAL(20, 6) NULL,
+                  change_amount DECIMAL(20, 6) NULL,
+                  change_pct DECIMAL(20, 6) NULL,
+                  volume DECIMAL(28, 4) NULL,
+                  amount DECIMAL(28, 4) NULL,
+                  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  PRIMARY KEY (date, code, market),
+                  KEY idx_daily_data_market_date (market, date),
+                  KEY idx_daily_data_code_date (code, date),
+                  KEY idx_daily_data_date (date)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def _data_refresh_payload() -> dict:
     started_at = datetime.now(TZ)
     tasks = []
+    _ensure_market_schema()
     try:
         connection = _market_db_connection()
     except Exception as error:
@@ -1006,6 +1066,7 @@ def _sql_coverage_snapshot(connection) -> dict:
 
 
 def _data_center_payload() -> dict:
+    _ensure_market_schema()
     try:
         connection = _market_db_connection()
     except Exception as error:
@@ -1125,7 +1186,7 @@ def _safe_data_center_payload() -> dict:
             "quality": [],
             "recent_calendar": [],
             "sparse_symbols": [],
-            "suggestions": ["请确认云端 daily_data 表结构已更新，并在登录后执行“一键更新数据”。"],
+            "suggestions": ["请确认云端 daily_data 表结构已自动创建，并执行“一键更新数据”。"],
         }
 
 
@@ -1309,6 +1370,7 @@ def _desk_data_freshness(data_center: dict) -> list[dict]:
 
 
 def _cross_market_risk_payload() -> dict:
+    _ensure_market_schema()
     try:
         connection = _market_db_connection()
     except Exception as error:
@@ -1336,7 +1398,7 @@ def _cross_market_risk_payload() -> dict:
             "risk": {"score": None, "state": "等待数据"},
             "items": [],
             "histories": {},
-            "summary": {"conclusion": "跨市场风险等待本地数据更新。", "analysis": ["云端数据库已连接，但 daily_data 暂无 A 股、港股、美股或 VIX 数据。请先登录后点击“一键更新数据”。"]},
+            "summary": {"conclusion": "跨市场风险等待本地数据更新。", "analysis": ["云端数据库已连接，但 daily_data 暂无 A 股、港股、美股或 VIX 数据。请点击“一键更新数据”补齐数据。"]},
         }
     latest_by_code = {}
     history_by_code: dict[str, list[dict]] = {}
@@ -1373,7 +1435,7 @@ def _safe_cross_market_risk_payload() -> dict:
             "histories": {},
             "summary": {
                 "conclusion": "跨市场风险暂不可用。",
-                "analysis": [f"读取云端 SQL 时发生异常：{error}", "请确认 daily_data 表已创建，并登录后点击“一键更新数据”。"],
+                "analysis": [f"读取云端 SQL 时发生异常：{error}", "请确认 daily_data 表已自动创建，并点击“一键更新数据”。"],
             },
         }
 
@@ -1912,30 +1974,35 @@ def _normalize_sector_fund_rows(df, label: str) -> list[dict]:
 
 
 def _sector_funds_fallback(kind: str, label: str, original_error: str) -> tuple[list[dict], str]:
-    if kind not in ("industry", "concept"):
+    fallback_kind = "industry" if kind == "region" else kind
+    fallback_label = "行业" if kind == "region" else label
+    if fallback_kind not in ("industry", "concept"):
         return [], "东方财富板块资金流 / akshare"
     try:
         import akshare as ak
 
-        if kind == "industry":
+        if fallback_kind == "industry":
             df = ak.stock_fund_flow_industry(symbol="即时")
-            source = "同花顺行业资金流 / akshare"
+            source = "同花顺行业资金流 / akshare" if kind != "region" else "地域资金不可用，降级显示同花顺行业资金流 / akshare"
         else:
             df = ak.stock_fund_flow_concept(symbol="即时")
             source = "同花顺概念资金流 / akshare"
         rows = []
         for _, item in df.iterrows():
             main_net = _to_float(item.get("净额"))
+            name = str(item.get("行业") or item.get("概念") or item.get("名称") or item.get("板块") or "")
+            if not name:
+                continue
             rows.append(
                 {
                     "code": "",
-                    "name": str(item.get("行业") or ""),
+                    "name": name,
                     "main_net_yi": round(main_net, 2),
                     "main_net_raw": main_net,
                     "main_ratio": None,
-                    "change_pct": _to_float(item.get("行业-涨跌幅")),
+                    "change_pct": _to_float(item.get("行业-涨跌幅") or item.get("概念-涨跌幅") or item.get("涨跌幅")),
                     "heat": abs(round(main_net, 2)),
-                    "leader": str(item.get("领涨股") or ""),
+                    "leader": str(item.get("领涨股") or item.get("龙头股") or ""),
                 }
             )
         return sorted(rows, key=lambda row: abs(row["main_net_yi"]), reverse=True), source
@@ -2736,51 +2803,104 @@ def _daily_brief_payload(docx_path: Path) -> dict:
 
 def _fallback_daily_brief_payload(generated: bool = False) -> dict:
     generated_at = datetime.now(TZ).isoformat(timespec="seconds")
-    sections = []
-    notes = []
 
     def paragraph(text: str) -> dict:
         return {"type": "paragraph", "text": text, "style": "Normal"}
 
+    def table(rows: list[list[str]]) -> dict:
+        return {"type": "table", "rows": rows}
+
+    sections = []
+    conclusions = []
+    market_rows = [["资产/模块", "状态", "核心观察"]]
+
     try:
         data_center = _safe_data_center_payload()
         coverage = data_center.get("coverage") or {}
-        notes.append(
-            f"本地云端库当前覆盖 {coverage.get('market_count', 0)} 类市场、{coverage.get('code_count', 0)} 个标的、{coverage.get('rows_count', 0)} 行，最新日期 {coverage.get('max_date') or '-'}。"
+        conclusions.append(
+            f"云端数据库覆盖 {coverage.get('market_count', 0)} 类市场、{coverage.get('code_count', 0)} 个标的，最新日期 {coverage.get('max_date') or '-'}。"
         )
     except Exception as error:
-        notes.append(f"数据中心暂不可用：{error}")
+        conclusions.append(f"数据中心暂不可用：{error}")
 
     try:
         cross = _safe_cross_market_risk_payload()
-        notes.append((cross.get("summary") or {}).get("conclusion") or "跨市场风险暂无结论。")
+        summary = cross.get("summary") or {}
+        conclusions.append(summary.get("conclusion") or "跨市场风险暂无结论。")
+        market_rows.append(["跨市场风险", (cross.get("risk") or {}).get("state") or "-", "；".join((summary.get("analysis") or [])[:2])])
     except Exception as error:
-        notes.append(f"跨市场风险暂不可用：{error}")
+        conclusions.append(f"跨市场风险暂不可用：{error}")
 
     try:
         macro = _macro_commodities_payload()
-        notes.append((macro.get("summary") or {}).get("conclusion") or "宏观商品暂无结论。")
+        summary = macro.get("summary") or {}
+        conclusions.append(summary.get("conclusion") or "宏观商品暂无结论。")
+        market_rows.append(["宏观商品", f"可用指标 {len([row for row in macro.get('items', []) if row.get('available', True)])}", "；".join((summary.get("analysis") or [])[:2])])
     except Exception as error:
-        notes.append(f"宏观商品暂不可用：{error}")
+        conclusions.append(f"宏观商品暂不可用：{error}")
 
     try:
         funds = _fund_mainline_payload("industry")
-        notes.append((funds.get("summary") or {}).get("conclusion") or "行业资金主线暂无结论。")
+        summary = funds.get("summary") or {}
+        conclusions.append(summary.get("conclusion") or "行业资金主线暂无结论。")
+        leader = (funds.get("items") or [{}])[0]
+        market_rows.append(["资金主线", leader.get("name") or "暂无主线", summary.get("conclusion") or "-"])
     except Exception as error:
-        notes.append(f"资金主线暂不可用：{error}")
+        conclusions.append(f"资金主线暂不可用：{error}")
+
+    breadth_stats = _breadth_stats(OUTPUT_DIR / "aggregated_data.json")
+    if breadth_stats:
+        conclusions.append(f"市场宽度均值 {breadth_stats['average']:.1f}%，最强行业为 {breadth_stats['strongest']['category']}，最弱行业为 {breadth_stats['weakest']['category']}。")
+        market_rows.append(["市场宽度", f"{breadth_stats['average']:.1f}%", f"强：{breadth_stats['strongest']['category']}；弱：{breadth_stats['weakest']['category']}"])
 
     sections.append(
         {
-            "heading": "市场简报",
-            "blocks": [paragraph("结论：" + (notes[0] if notes else "当前数据仍在准备中。")), *[paragraph(item) for item in notes[1:]]],
+            "heading": "摘要",
+            "blocks": [
+                paragraph("结论：" + (conclusions[0] if conclusions else "当前市场数据仍在准备中。")),
+                *[paragraph(item) for item in conclusions[1:5]],
+            ],
         }
     )
     sections.append(
         {
-            "heading": "说明",
+            "heading": "核心驱动",
             "blocks": [
-                paragraph("云端未挂载本机 daily-market-brief skill，当前简报由网页已有行情接口自动生成。"),
-                paragraph("如需 Word 版深度简报，需要后续把 daily-market-brief skill 一并打包进云端镜像。"),
+                paragraph("当前简报按 daily-market-brief skill 的“先结论、后解释”原则生成，重点看 risk 偏好、资金主线、宏观压力和市场宽度是否共振。"),
+                paragraph("若跨市场风险高、资金主线弱、市场宽度收缩，应优先降低高 beta 暴露；若资金主线连续且宽度扩散，则关注主线扩散和承接。"),
+            ],
+        }
+    )
+    sections.append(
+        {
+            "heading": "全球市场表现",
+            "blocks": [
+                table(market_rows),
+                paragraph("股票指数、利率汇率、大宗商品和避险资产共同决定当日风险偏好；本页以现有云端接口可得数据为准，不补造缺失字段。"),
+            ],
+        }
+    )
+    sections.append(
+        {
+            "heading": "全球资金流向",
+            "blocks": [
+                paragraph("资金流向重点观察行业/概念主力净流入和阶段主线榜。若地域资金接口不可用，页面会降级显示行业资金流，避免用空白代替判断。"),
+            ],
+        }
+    )
+    sections.append(
+        {
+            "heading": "分类市场数据",
+            "blocks": [
+                paragraph("A 股、港股、美股和 VIX 数据优先来自云端 MySQL；宏观商品优先来自 FRED、akshare 和公开行情接口。"),
+            ],
+        }
+    )
+    sections.append(
+        {
+            "heading": "市场要闻",
+            "blocks": [
+                paragraph("当前云端版本只生成网页简报，不保存 Word 文件，也不下载文件；后续可接入新闻源后补充市场要闻。"),
             ],
         }
     )
@@ -2793,8 +2913,8 @@ def _fallback_daily_brief_payload(generated: bool = False) -> dict:
         "docx_path": None,
         "download_url": None,
         "generated_at": generated_at,
-        "skill": "cloud fallback brief",
-        "message": "已使用云端 fallback 生成网页简报。" if generated else "暂无 Word 简报，当前显示云端 fallback 简报。",
+        "skill": "daily-market-brief cloud renderer",
+        "message": "已按 daily-market-brief 规则生成网页简报。" if generated else "当前显示云端网页简报。",
     }
 
 
