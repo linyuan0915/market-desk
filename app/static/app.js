@@ -473,22 +473,34 @@ function renderDeskCard(card) {
 function renderRefreshJob(job) {
   const panel = document.getElementById("refreshJobPanel");
   const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
+  const warnings = job.warnings || [];
   panel.classList.remove("hidden");
   document.getElementById("refreshJobTitle").textContent =
-    job.status === "completed" ? "数据更新完成" : job.status === "failed" ? "数据更新失败" : "后台更新数据";
+    job.status === "completed"
+      ? "数据更新完成"
+      : job.status === "completed_with_warnings"
+        ? "数据更新部分完成"
+        : job.status === "failed"
+          ? "数据更新失败"
+          : "后台更新数据";
   document.getElementById("refreshJobMessage").textContent = job.message || "-";
   document.getElementById("refreshJobPercent").textContent = `${Math.round(progress)}%`;
   document.getElementById("refreshProgressBar").style.width = `${progress}%`;
-  document.getElementById("refreshJobTasks").innerHTML = (job.tasks || [])
+  const taskHtml = (job.tasks || [])
     .map(
       (task) => `
         <div>
           <strong>${escapeHtml(task.name || "-")}</strong>
           <span>${task.ok ? "完成" : "有警告"} · ${formatNumber(task.rows_upserted || 0, 0)} 行</span>
+          ${task.warnings && task.warnings.length ? `<small>${escapeHtml(task.warnings.slice(0, 2).join("；"))}</small>` : ""}
         </div>
       `,
     )
     .join("");
+  const warningHtml = warnings.length
+    ? `<div class="refresh-job-warning"><strong>需要关注</strong><span>${escapeHtml(warnings.slice(0, 4).join("；"))}</span></div>`
+    : "";
+  document.getElementById("refreshJobTasks").innerHTML = taskHtml + warningHtml;
 }
 
 function renderRank(rows, className) {

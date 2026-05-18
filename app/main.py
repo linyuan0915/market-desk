@@ -1146,6 +1146,7 @@ def _data_center_payload() -> dict:
     for row in markets:
         days = _calendar_days(row.get("min_date"), row.get("max_date"))
         avg_rows = (row["rows_count"] / days) if days else 0
+        missing_breakdown = _coverage_missing_breakdown(row)
         quality.append(
             {
                 "market": row["market"],
@@ -1153,7 +1154,8 @@ def _data_center_payload() -> dict:
                 "code_count": row["code_count"],
                 "date_range": f"{row['min_date']} 至 {row['max_date']}",
                 "avg_rows_per_calendar_day": round(avg_rows, 1),
-                "missing_total": int((row.get("missing_close") or 0) + (row.get("missing_change_pct") or 0) + (row.get("missing_amount") or 0)),
+                "missing_total": sum(missing_breakdown.values()),
+                "missing_breakdown": missing_breakdown,
                 "status": _coverage_status(row),
             }
         )
@@ -1867,15 +1869,28 @@ def _calendar_days(start, end) -> int:
 
 def _coverage_status(row: dict) -> str:
     days = _calendar_days(row.get("min_date"), row.get("max_date"))
-    missing_change = int(row.get("missing_change_pct") or 0)
-    missing_close = int(row.get("missing_close") or 0)
+    missing_breakdown = _coverage_missing_breakdown(row)
     if row["market"] == "A股个股" and days < 180:
         return "历史偏短"
-    if missing_close > 0 or missing_change > int(row.get("code_count") or 0):
+    if missing_breakdown.get("close", 0) > 0:
+        return "字段缺失"
+    if missing_breakdown.get("change_pct", 0) > int(row.get("code_count") or 0):
         return "字段缺失"
     if row["code_count"] <= 3:
         return "样本较少"
     return "可用"
+
+
+def _coverage_missing_breakdown(row: dict) -> dict[str, int]:
+    market = str(row.get("market") or "")
+    missing = {
+        "close": int(row.get("missing_close") or 0),
+        "change_pct": max(0, int(row.get("missing_change_pct") or 0) - int(row.get("code_count") or 0)),
+        "amount": int(row.get("missing_amount") or 0),
+    }
+    if market in {"港股指数", "美股指数", "美股波动率"}:
+        missing["amount"] = 0
+    return missing
 
 
 def _data_center_suggestions(markets: list[dict], a_stock: dict | None) -> list[str]:

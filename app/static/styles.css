@@ -357,12 +357,25 @@ span {
   gap: 8px;
   align-items: center;
   padding: 7px 9px;
-  border-radius: 999px;
+  border-radius: 8px;
   background: #f3f7fb;
 }
 
 .refresh-job-tasks strong {
   font-size: 12px;
+}
+
+.refresh-job-tasks small {
+  max-width: 420px;
+  color: #a33d2e;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.refresh-job-warning {
+  flex-basis: 100%;
+  border: 1px solid #f0c8bf;
+  background: #fff6f3 !important;
 }
 
 .hidden {
