@@ -70,7 +70,7 @@ SESSION_COOKIE_NAME = "market_desk_session"
 YAHOO_MARKET_SYMBOLS = [
     {"code": "^HSI", "name": "恒生指数", "market": "港股指数", "yahoo": "^HSI"},
     {"code": "^HSCE", "name": "恒生国企指数", "market": "港股指数", "yahoo": "^HSCE"},
-    {"code": "HSTECH.HK", "name": "恒生科技指数", "market": "港股指数", "yahoo": "HSTECH.HK"},
+    {"code": "HSTECH.HK", "name": "恒生科技指数", "market": "港股指数", "yahoo": "HSTECH.HK", "fallback": "akshare_hk_index_sina", "fallback_symbol": "HSTECH"},
     {"code": "^GSPC", "name": "标普500", "market": "美股指数", "yahoo": "^GSPC"},
     {"code": "^IXIC", "name": "纳斯达克综合", "market": "美股指数", "yahoo": "^IXIC"},
     {"code": "^DJI", "name": "道琼斯", "market": "美股指数", "yahoo": "^DJI"},
@@ -833,16 +833,30 @@ def _refresh_yahoo_markets_to_sql(connection) -> dict:
     start_date = _refresh_start_date(connection, "港美指数/VIX", end_date, fallback_days=10, markets=("港股指数", "美股指数", "美股波动率"))
     total = 0
     warnings = []
+    sources = {"Yahoo Finance chart"}
     for item in YAHOO_MARKET_SYMBOLS:
         try:
             rows = _yahoo_chart_rows(item, start_date, end_date)
+            if item.get("fallback") and len(rows) < _expected_market_points(start_date, end_date):
+                yahoo_count = len(rows)
+                fallback_rows = _fallback_market_rows(item, start_date, end_date)
+                if len(fallback_rows) > len(rows):
+                    rows = fallback_rows
+                    sources.add("akshare stock_hk_index_daily_sina")
+                    warnings.append(f"{item['code']}: Yahoo 仅返回 {yahoo_count} 条，已切换备用源")
             total += _upsert_market_rows(connection, rows)
         except Exception as error:
-            warnings.append(f"{item['code']}: {error}")
+            try:
+                rows = _fallback_market_rows(item, start_date, end_date)
+                total += _upsert_market_rows(connection, rows)
+                sources.add("akshare stock_hk_index_daily_sina")
+                warnings.append(f"{item['code']}: Yahoo 失败，已使用备用源")
+            except Exception:
+                warnings.append(f"{item['code']}: {error}")
     return {
         "name": "港美指数/VIX",
         "ok": not warnings,
-        "source": "Yahoo Finance chart",
+        "source": " + ".join(sorted(sources)),
         "symbols": len(YAHOO_MARKET_SYMBOLS),
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
@@ -865,6 +879,10 @@ def _refresh_start_date(connection, market: str, end_date: date, fallback_days: 
     if isinstance(latest, date):
         return max(latest - timedelta(days=3), end_date - timedelta(days=30))
     return end_date - timedelta(days=fallback_days)
+
+
+def _expected_market_points(start_date: date, end_date: date) -> int:
+    return max(2, min(5, _calendar_days(start_date, end_date) // 2))
 
 
 def _watchlist_a_share_symbols(connection) -> list[dict]:
@@ -992,6 +1010,69 @@ def _yahoo_chart_rows(item: dict, start_date: date, end_date: date) -> list[dict
             }
         )
     return rows
+
+
+def _fallback_market_rows(item: dict, start_date: date, end_date: date) -> list[dict]:
+    if item.get("fallback") != "akshare_hk_index_sina":
+        raise RuntimeError("未配置备用行情源")
+    import akshare as ak
+
+    df = ak.stock_hk_index_daily_sina(symbol=item.get("fallback_symbol") or item["code"])
+    rows = []
+    previous_close = None
+    for _, record in df.iterrows():
+        trade_date = _parse_date_value(record.get("date"))
+        if not trade_date or trade_date < start_date or trade_date > end_date:
+            continue
+        close = _to_float_or_none(record.get("close"))
+        if close is None:
+            continue
+        change = close - previous_close if previous_close else None
+        change_pct = (close / previous_close - 1) * 100 if previous_close else None
+        previous_close = close
+        rows.append(
+            {
+                "date": trade_date.isoformat(),
+                "code": item["code"],
+                "name": item["name"],
+                "market": item["market"],
+                "close": close,
+                "change": change,
+                "change_pct": change_pct,
+                "volume": _to_float_or_none(record.get("volume")),
+                "amount": _to_float_or_none(record.get("amount")),
+                "open": _to_float_or_none(record.get("open")),
+                "high": _to_float_or_none(record.get("high")),
+                "low": _to_float_or_none(record.get("low")),
+            }
+        )
+    if not rows:
+        raise RuntimeError("备用源未返回有效行情")
+    return rows
+
+
+def _parse_date_value(value) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _to_float_or_none(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, float) and math.isnan(value):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _upsert_market_rows(connection, rows: list[dict]) -> int:
