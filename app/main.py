@@ -187,12 +187,7 @@ def health() -> dict:
         "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
         "database": database,
         "data_sources": {
-            "ifind": {
-                "credentials_configured": bool(IFIND_USERNAME and IFIND_PASSWORD),
-                "sdk_available": bool(_ifind_module()),
-                "sdk_diagnostics": _ifind_module_diagnostics(),
-                "priority": "historical A-share data" if IFIND_USERNAME and IFIND_PASSWORD else "not configured",
-            }
+            "ifind": _ifind_health_status()
         },
         "auth_enabled": _auth_enabled(),
     }
@@ -1032,8 +1027,22 @@ def _ifind_module():
     return None
 
 
-def _ifind_module_diagnostics() -> list[dict]:
-    diagnostics = []
+def _ifind_health_status() -> dict:
+    credentials_configured = bool(IFIND_USERNAME and IFIND_PASSWORD)
+    sdk_module = _ifind_module()
+    diagnostics = _ifind_module_diagnostics()
+    return {
+        "credentials_configured": credentials_configured,
+        "sdk_available": bool(sdk_module),
+        "active_module": getattr(sdk_module, "__name__", None) if sdk_module else None,
+        "priority": "historical A-share data" if credentials_configured else "not configured",
+        "status": "ready" if credentials_configured and sdk_module else "fallback",
+        "diagnostics": diagnostics,
+    }
+
+
+def _ifind_module_diagnostics() -> dict:
+    candidates = []
     for module_name in ("iFinDPy", "THS_iFinD"):
         spec = importlib.util.find_spec(module_name)
         item = {"module": module_name, "found": bool(spec), "origin": getattr(spec, "origin", None)}
@@ -1044,8 +1053,13 @@ def _ifind_module_diagnostics() -> list[dict]:
             item["importable"] = False
             item["error_type"] = type(error).__name__
             item["error"] = str(error)[:500]
-        diagnostics.append(item)
-    return diagnostics
+        candidates.append(item)
+    active = next((item for item in candidates if item.get("importable")), None)
+    return {
+        "active": active,
+        "candidates": candidates,
+        "note": "Only one importable iFinD SDK module is required; missing fallback module names are not failures.",
+    }
 
 
 def _ifind_login(module) -> None:
