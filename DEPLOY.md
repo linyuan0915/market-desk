@@ -14,6 +14,7 @@
 当前项目已准备好：
 
 - `Dockerfile`：FastAPI + 静态资源同容器部署。
+- `railway.toml`：Railway Docker 部署、健康检查和失败重启配置。
 - `.dockerignore`：不把本地缓存、依赖、数据库、输出图片打进镜像。
 - `render.yaml`：Render Blueprint 示例。
 - `.env.example`：本地和云端环境变量模板。
@@ -24,7 +25,7 @@
 部署平台需要配置：
 
 - `RSSCAST_MCP_TOKEN`：RssCast MCP token。
-- `IFIND_USERNAME` / `IFIND_PASSWORD`：iFinD 同花顺量化 API 账号密码。配置后历史行情优先走 iFinD；未安装 SDK 或调用失败时自动回退原数据源。
+- `IFIND_USERNAME` / `IFIND_PASSWORD`：iFinD 同花顺量化 API 账号密码。Railway/Linux 云端会优先通过 iFinD Python SDK 调用 `THS_iFinDLogin` 和 `THS_HistoryQuotes`，不需要登录同花顺客户端；SDK 不可用或调用失败时自动回退原数据源。
 - `IFIND_HISTORY_FIELDS` / `IFIND_HISTORY_OPTIONS`：iFinD 历史行情字段和参数，默认 `open;high;low;close;volume;amount` 和日频前复权设置。
 - `MARKET_DB_HOST` / `MARKET_DB_PORT` / `MARKET_DB_USER` / `MARKET_DB_PASSWORD` / `MARKET_DATA_DB`：云 MySQL 连接信息。
 - `APP_PASSWORD`：自选池添加/删除的管理密码。本地不配置时默认免登录；公开站点的查看、刷新、生成和数据更新不需要登录。
@@ -63,11 +64,16 @@ mysql -h <cloud-host> -u <cloud-user> -p market_data < market_data_daily_data.sq
 
 ## Railway / Fly.io
 
-1. 使用本目录的 `Dockerfile` 构建服务。
-2. 启动命令使用默认 `uvicorn app.main:app --host 0.0.0.0 --port 8000`。
-3. 绑定云 MySQL，把本地 `market_data.daily_data` 迁移到云库。
-4. 在平台环境变量中配置上方变量。
-5. 首次上线后打开网页，点击“一键更新数据”，观察页面顶部后台进度条。
+Railway 推荐操作：
+
+1. 连接 GitHub 仓库 `linyuan0915/market-desk`，Root Directory 填 `.`。
+2. Railway 会读取 `railway.toml` 并使用 `Dockerfile` 构建。
+3. 绑定云 MySQL，把本地 `market_data.daily_data` 迁移到云库，或让网页首次更新时逐步补数据。
+4. 在 Variables 中配置上方变量，尤其是 `IFIND_USERNAME`、`IFIND_PASSWORD`、`MARKET_DB_*`、`APP_PASSWORD`、`APP_SESSION_SECRET`。
+5. Deploy 后打开 `/api/health`，确认 `data_sources.ifind.sdk_available` 为 `true` 时，说明云端 iFinD SDK 已可加载；如果为 `false`，网页仍会自动回退原数据源。
+6. 首次上线后打开网页，点击“一键更新数据”，观察页面顶部后台进度条。
+
+Fly.io 可复用同一个 `Dockerfile`，启动命令使用默认 `uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}`。
 
 ## VPS
 
