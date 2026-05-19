@@ -646,6 +646,19 @@ function renderSentiment(data) {
 }
 
 function renderDataCenter(data) {
+  const ifind = data.data_sources?.ifind || {};
+  const lastRefresh = data.data_sources?.last_refresh || null;
+  const ifindState = ifind.status === "ready" ? "iFinD 已接入" : "iFinD 回退中";
+  const refreshTasks = (lastRefresh?.tasks || [])
+    .map(
+      (task) => `
+        <li>
+          <strong>${escapeHtml(task.name || "-")}</strong>
+          <span>${escapeHtml(task.source || "-")} · ${formatNumber(task.rows_upserted || 0, 0)} 行</span>
+        </li>
+      `,
+    )
+    .join("");
   document.getElementById("statusLabelA").textContent = "最新日期";
   document.getElementById("statusLabelB").textContent = "标的数量";
   document.getElementById("statusLabelC").textContent = "更新时间";
@@ -657,6 +670,18 @@ function renderDataCenter(data) {
   document.getElementById("dataCenterSummary").innerHTML = `
     <span>数据诊断</span>
     <strong>${data.available === false ? escapeHtml(data.message || "本地数据库不可用。") : `当前库共 ${data.coverage.rows_count} 行，覆盖 ${data.coverage.market_count} 类市场、${data.coverage.code_count} 个标的。`}</strong>
+    <div class="source-status">
+      <div>
+        <small>A股历史行情</small>
+        <strong>${escapeHtml(ifindState)}</strong>
+        <em>${escapeHtml(ifind.active_module || "备用数据源")} · ${ifind.sdk_available ? "SDK 可用" : "SDK 不可用"}</em>
+      </div>
+      <div>
+        <small>最近更新来源</small>
+        <strong>${escapeHtml(lastRefresh?.message || "暂无本轮更新记录")}</strong>
+        ${refreshTasks ? `<ul>${refreshTasks}</ul>` : ""}
+      </div>
+    </div>
     ${suggestions ? `<ul>${suggestions}</ul>` : ""}
   `;
   document.getElementById("dataQualityGrid").innerHTML = (data.quality || [])

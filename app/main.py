@@ -132,6 +132,7 @@ RESPONSE_CACHE: dict[str, dict] = {}
 RESPONSE_CACHE_LOCK = threading.Lock()
 DATA_REFRESH_JOBS: dict[str, dict] = {}
 DATA_REFRESH_LOCK = threading.Lock()
+LAST_DATA_REFRESH_RESULT: dict | None = None
 
 app = FastAPI(title="市场宽度鱼盆热力图")
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -457,7 +458,7 @@ def data_refresh_job(job_id: str) -> JSONResponse:
 
 @app.get("/api/ifind-test")
 def ifind_test() -> JSONResponse:
-    return JSONResponse(_safe_ifind_test_payload())
+    return JSONResponse(_safe_ifind_test_payload(), media_type="application/json; charset=utf-8")
 
 
 @app.get("/api/desk")
@@ -632,7 +633,21 @@ def _update_data_refresh_job(job_id: str, **updates) -> None:
         job["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
 
 
+def _latest_data_refresh_result() -> dict | None:
+    with DATA_REFRESH_LOCK:
+        if LAST_DATA_REFRESH_RESULT:
+            return json.loads(json.dumps(LAST_DATA_REFRESH_RESULT, default=str, ensure_ascii=False))
+        finished_jobs = [
+            job for job in DATA_REFRESH_JOBS.values() if job.get("result") and job.get("finished_at")
+        ]
+        if not finished_jobs:
+            return None
+        latest = max(finished_jobs, key=lambda job: str(job.get("finished_at") or ""))
+        return json.loads(json.dumps(latest.get("result"), default=str, ensure_ascii=False))
+
+
 def _run_data_refresh_job(job_id: str) -> None:
+    global LAST_DATA_REFRESH_RESULT
     started_at = datetime.now(TZ)
     task_plan = [
         ("A股指数", _refresh_a_share_indices_to_sql, 25),
@@ -674,6 +689,8 @@ def _run_data_refresh_job(job_id: str) -> None:
         "warnings": warnings,
         "coverage": coverage,
     }
+    with DATA_REFRESH_LOCK:
+        LAST_DATA_REFRESH_RESULT = result
     _invalidate_data_views()
     _update_data_refresh_job(
         job_id,
@@ -1613,6 +1630,8 @@ def _data_center_payload() -> dict:
         )
     a_stock = next((row for row in markets if row["market"] == "A股个股"), None)
     suggestions = _data_center_suggestions(markets, a_stock)
+    last_refresh = _latest_data_refresh_result()
+    ifind_health = _ifind_health_status()
     return {
         "available": True,
         "source": f"MySQL/{MARKET_DATA_DB}.daily_data",
@@ -1623,6 +1642,34 @@ def _data_center_payload() -> dict:
         "recent_calendar": [_json_safe_row(row) for row in recent],
         "sparse_symbols": [_json_safe_row(row) for row in sparse],
         "suggestions": suggestions,
+        "data_sources": {
+            "ifind": ifind_health,
+            "last_refresh": _data_refresh_summary(last_refresh),
+        },
+    }
+
+
+def _data_refresh_summary(result: dict | None) -> dict | None:
+    if not result:
+        return None
+    tasks = result.get("tasks") or []
+    return {
+        "generated_at": result.get("generated_at"),
+        "message": result.get("message"),
+        "rows_upserted": result.get("rows_upserted"),
+        "warnings": result.get("warnings") or [],
+        "tasks": [
+            {
+                "name": task.get("name"),
+                "ok": task.get("ok"),
+                "source": task.get("source"),
+                "rows_upserted": task.get("rows_upserted"),
+                "start_date": task.get("start_date"),
+                "end_date": task.get("end_date"),
+                "warnings": task.get("warnings") or [],
+            }
+            for task in tasks
+        ],
     }
 
 
