@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import importlib.util
+import importlib
 import base64
 import hashlib
 import hmac
@@ -26,6 +27,28 @@ from fastapi.staticfiles import StaticFiles
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+
+
+def _load_local_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_local_env_file(ROOT_DIR / ".env.local")
+
 STATIC_DIR = ROOT_DIR / "app" / "static"
 OUTPUT_DIR = ROOT_DIR / "output"
 WATCHLIST_PATH = OUTPUT_DIR / "watchlist.json"
@@ -40,6 +63,13 @@ DAILY_BRIEF_OUTPUT_DIR = DAILY_BRIEF_DIR / "output"
 DAILY_BRIEF_BUILD_SCRIPT = DAILY_BRIEF_DIR / "tmp" / "docx" / "build_5_15_brief.py"
 RSSCAST_URL = "https://app-cn.rsscast.io/api/mcp/v1/mcp"
 MARKET_DATA_DB = os.environ.get("MARKET_DATA_DB", "market_data")
+IFIND_USERNAME = os.environ.get("IFIND_USERNAME", "")
+IFIND_PASSWORD = os.environ.get("IFIND_PASSWORD", "")
+IFIND_HISTORY_OPTIONS = os.environ.get(
+    "IFIND_HISTORY_OPTIONS",
+    "Interval:D,CPS:1,baseDate:1900-01-01,Currency:YSHB,Fill:Previous",
+)
+IFIND_HISTORY_FIELDS = os.environ.get("IFIND_HISTORY_FIELDS", "open;high;low;close;volume;amount")
 EASTMONEY_KAMT_URL = "https://push2.eastmoney.com/api/qt/kamt/get"
 EASTMONEY_INDEX_FLOW_URL = "https://push2.eastmoney.com/api/qt/ulist.np/get"
 EASTMONEY_LIMIT_UP_URL = "https://push2ex.eastmoney.com/getTopicZTPool"
@@ -48,12 +78,12 @@ FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 TZ = ZoneInfo("Asia/Hong_Kong")
 INDUSTRY_CATEGORY_MAP = {}
 INDEX_META = [
-    {"code": "000001", "name": "上证指数", "db_code": "000001.SS"},
-    {"code": "399001", "name": "深证成指", "db_code": "399001.SZ"},
-    {"code": "399006", "name": "创业板指", "db_code": "399006.SZ"},
-    {"code": "000300", "name": "沪深300", "db_code": "000300.SS"},
-    {"code": "000905", "name": "中证500", "db_code": "000905.SS"},
-    {"code": "000688", "name": "科创50", "db_code": "000688.SS"},
+    {"code": "000001", "name": "上证指数", "db_code": "000001.SS", "ifind_code": "000001.SH"},
+    {"code": "399001", "name": "深证成指", "db_code": "399001.SZ", "ifind_code": "399001.SZ"},
+    {"code": "399006", "name": "创业板指", "db_code": "399006.SZ", "ifind_code": "399006.SZ"},
+    {"code": "000300", "name": "沪深300", "db_code": "000300.SS", "ifind_code": "000300.SH"},
+    {"code": "000905", "name": "中证500", "db_code": "000905.SS", "ifind_code": "000905.SH"},
+    {"code": "000688", "name": "科创50", "db_code": "000688.SS", "ifind_code": "000688.SH"},
 ]
 DEFAULT_WATCHLIST = [
     {"code": "300750", "name": "宁德时代", "category": "新能源"},
@@ -156,6 +186,13 @@ def health() -> dict:
         "app": "market-desk",
         "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
         "database": database,
+        "data_sources": {
+            "ifind": {
+                "credentials_configured": bool(IFIND_USERNAME and IFIND_PASSWORD),
+                "sdk_available": bool(_ifind_module()),
+                "priority": "historical A-share data" if IFIND_USERNAME and IFIND_PASSWORD else "not configured",
+            }
+        },
         "auth_enabled": _auth_enabled(),
     }
 
@@ -780,6 +817,32 @@ def _refresh_a_share_indices_to_sql(connection) -> dict:
     codes = [item["code"] for item in INDEX_META]
     end_date = datetime.now(TZ).date()
     start_date = _refresh_start_date(connection, "A股指数", end_date, fallback_days=10)
+    if _ifind_configured():
+        try:
+            rows = _ifind_history_rows(
+                INDEX_META,
+                start_date,
+                end_date,
+                market="A股指数",
+                code_key="ifind_code",
+                db_code_key="db_code",
+            )
+            count = _upsert_market_rows(connection, rows)
+            return {
+                "name": "A股指数",
+                "ok": True,
+                "source": "iFinD THS_HistoryQuotes",
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "rows_upserted": count,
+                "warnings": [],
+            }
+        except Exception as error:
+            ifind_warning = f"iFinD 失败，已回退 RssCast：{error}"
+        else:
+            ifind_warning = ""
+    else:
+        ifind_warning = "iFinD 未配置或 SDK 未安装，使用 RssCast"
     try:
         rows = _rsscast_call(
             "StockIndexKLineQuery",
@@ -788,16 +851,44 @@ def _refresh_a_share_indices_to_sql(connection) -> dict:
         meta = {item["code"]: item["name"] for item in INDEX_META}
         suffix_map = {item["code"]: item.get("db_code", item["code"]) for item in INDEX_META}
         count = _upsert_market_rows(connection, _normalize_rsscast_history_rows(rows, meta, "A股指数", suffix_map))
-        return {"name": "A股指数", "ok": True, "source": "RssCast StockIndexKLineQuery", "start_date": start_date.isoformat(), "end_date": end_date.isoformat(), "rows_upserted": count, "warnings": []}
+        warnings = [ifind_warning] if ifind_warning and "失败" in ifind_warning else []
+        return {"name": "A股指数", "ok": True, "source": "RssCast StockIndexKLineQuery", "start_date": start_date.isoformat(), "end_date": end_date.isoformat(), "rows_upserted": count, "warnings": warnings}
     except Exception as error:
-        return {"name": "A股指数", "ok": False, "source": "RssCast StockIndexKLineQuery", "rows_upserted": 0, "warnings": [str(error)]}
+        warnings = [message for message in [ifind_warning, str(error)] if message]
+        return {"name": "A股指数", "ok": False, "source": "iFinD/RssCast", "rows_upserted": 0, "warnings": warnings}
 
 
 def _refresh_a_share_stocks_to_sql(connection) -> dict:
     end_date = datetime.now(TZ).date()
     symbols = _watchlist_a_share_symbols(connection)
+    if _ifind_configured() and symbols:
+        try:
+            rows = _ifind_history_rows(
+                symbols,
+                min((item["start_date"] for item in symbols), default=end_date),
+                end_date,
+                market="A股个股",
+                code_key="ifind_code",
+                db_code_key="code",
+            )
+            count = _upsert_market_rows(connection, rows)
+            return {
+                "name": "A股个股",
+                "ok": True,
+                "source": "iFinD THS_HistoryQuotes",
+                "symbols": len(symbols),
+                "scope": "自选池",
+                "start_date": min((item["start_date"] for item in symbols), default=end_date).isoformat(),
+                "end_date": end_date.isoformat(),
+                "rows_upserted": count,
+                "warnings": [],
+            }
+        except Exception as error:
+            ifind_warning = f"iFinD 失败，已回退 RssCast：{error}"
+    else:
+        ifind_warning = "iFinD 未配置或 SDK 未安装，使用 RssCast"
     total = 0
-    warnings = []
+    warnings = [ifind_warning] if ifind_warning and "失败" in ifind_warning else []
     grouped: dict[date, list[dict]] = {}
     for item in symbols:
         grouped.setdefault(item["start_date"], []).append(item)
@@ -910,6 +1001,7 @@ def _watchlist_a_share_symbols(connection) -> list[dict]:
         output.append(
             {
                 "code": db_code,
+                "ifind_code": _a_share_ifind_code(plain_code),
                 "plain_code": plain_code,
                 "name": item.get("name") or plain_code,
                 "start_date": start_date,
@@ -920,6 +1012,137 @@ def _watchlist_a_share_symbols(connection) -> list[dict]:
 
 def _a_share_db_code(plain_code: str) -> str:
     return f"{plain_code}.SS" if plain_code.startswith("6") else f"{plain_code}.SZ"
+
+
+def _a_share_ifind_code(plain_code: str) -> str:
+    return f"{plain_code}.SH" if plain_code.startswith("6") else f"{plain_code}.SZ"
+
+
+def _ifind_configured() -> bool:
+    return bool(IFIND_USERNAME and IFIND_PASSWORD and _ifind_module())
+
+
+def _ifind_module():
+    for module_name in ("iFinDPy", "THS_iFinD"):
+        try:
+            return importlib.import_module(module_name)
+        except (ImportError, OSError):
+            continue
+    return None
+
+
+def _ifind_login(module) -> None:
+    login = getattr(module, "THS_iFinDLogin", None)
+    if not login:
+        raise RuntimeError("未找到 THS_iFinDLogin，请确认 iFinD Python SDK 已安装")
+    result = login(IFIND_USERNAME, IFIND_PASSWORD)
+    if isinstance(result, int) and result not in (0, -201):
+        raise RuntimeError(f"iFinD 登录失败，错误码 {result}")
+    if hasattr(result, "errorcode") and getattr(result, "errorcode") not in (0, -201, None):
+        raise RuntimeError(f"iFinD 登录失败，错误码 {getattr(result, 'errorcode')}")
+
+
+def _ifind_history_rows(
+    symbols: list[dict],
+    start_date: date,
+    end_date: date,
+    market: str,
+    code_key: str,
+    db_code_key: str,
+) -> list[dict]:
+    module = _ifind_module()
+    if not module:
+        raise RuntimeError("未安装 iFinD Python SDK，无法 import iFinDPy/THS_iFinD")
+    _ifind_login(module)
+    history = getattr(module, "THS_HistoryQuotes", None)
+    if not history:
+        raise RuntimeError("未找到 THS_HistoryQuotes，请确认 iFinD Python SDK 版本")
+
+    codes = [str(item.get(code_key) or item.get("code") or "") for item in symbols]
+    code_to_meta = {str(item.get(code_key) or item.get("code") or ""): item for item in symbols}
+    result = history(
+        ",".join(codes),
+        IFIND_HISTORY_FIELDS,
+        IFIND_HISTORY_OPTIONS,
+        start_date.strftime("%Y-%m-%d"),
+        end_date.strftime("%Y-%m-%d"),
+    )
+    raw_rows = _ifind_result_to_records(result)
+    rows = []
+    previous_close_by_code: dict[str, float] = {}
+    for raw in sorted(raw_rows, key=lambda item: (str(item.get("thscode") or item.get("code") or ""), str(item.get("time") or item.get("date") or ""))):
+        source_code = str(raw.get("thscode") or raw.get("code") or raw.get("thsCode") or "")
+        meta = code_to_meta.get(source_code)
+        if not meta:
+            continue
+        trade_date = _parse_date_value(raw.get("time") or raw.get("date") or raw.get("datetime"))
+        close = _to_float_or_none(raw.get("close"))
+        if not trade_date or close is None:
+            continue
+        db_code = str(meta.get(db_code_key) or meta.get("code") or source_code)
+        previous_close = previous_close_by_code.get(db_code)
+        change = close - previous_close if previous_close else None
+        change_pct = (close / previous_close - 1) * 100 if previous_close else None
+        previous_close_by_code[db_code] = close
+        rows.append(
+            {
+                "date": trade_date.isoformat(),
+                "code": db_code,
+                "name": meta.get("name") or db_code,
+                "market": market,
+                "close": close,
+                "change": change,
+                "change_pct": change_pct,
+                "volume": _to_float_or_none(raw.get("volume") or raw.get("vol")),
+                "amount": _to_float_or_none(raw.get("amount") or raw.get("amt")),
+                "open": _to_float_or_none(raw.get("open")),
+                "high": _to_float_or_none(raw.get("high")),
+                "low": _to_float_or_none(raw.get("low")),
+            }
+        )
+    if not rows:
+        raise RuntimeError("iFinD 未返回有效历史行情")
+    return rows
+
+
+def _ifind_result_to_records(result) -> list[dict]:
+    if hasattr(result, "errorcode") and getattr(result, "errorcode") not in (0, None):
+        raise RuntimeError(f"iFinD 返回错误码 {getattr(result, 'errorcode')}: {getattr(result, 'errmsg', '')}")
+    if hasattr(result, "data"):
+        data = getattr(result, "data")
+        if hasattr(data, "to_dict"):
+            return data.to_dict("records")
+        if isinstance(data, list):
+            return [row for row in data if isinstance(row, dict)]
+    if hasattr(result, "tables"):
+        records = []
+        for table in getattr(result, "tables") or []:
+            records.extend(_ifind_table_to_records(table))
+        return records
+    if isinstance(result, dict):
+        if isinstance(result.get("tables"), list):
+            records = []
+            for table in result["tables"]:
+                records.extend(_ifind_table_to_records(table))
+            return records
+        if isinstance(result.get("data"), list):
+            return [row for row in result["data"] if isinstance(row, dict)]
+    raise RuntimeError("无法解析 iFinD 返回结构")
+
+
+def _ifind_table_to_records(table) -> list[dict]:
+    if hasattr(table, "to_dict"):
+        try:
+            return table.to_dict("records")
+        except TypeError:
+            pass
+    if isinstance(table, dict):
+        rows = table.get("table") or table.get("data") or []
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+    if isinstance(table, list):
+        return [row for row in table if isinstance(row, dict)]
+    return []
 
 
 def _latest_symbol_date(connection, code: str) -> date | None:

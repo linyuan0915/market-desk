@@ -24,6 +24,8 @@
 部署平台需要配置：
 
 - `RSSCAST_MCP_TOKEN`：RssCast MCP token。
+- `IFIND_USERNAME` / `IFIND_PASSWORD`：iFinD 同花顺量化 API 账号密码。配置后历史行情优先走 iFinD；未安装 SDK 或调用失败时自动回退原数据源。
+- `IFIND_HISTORY_FIELDS` / `IFIND_HISTORY_OPTIONS`：iFinD 历史行情字段和参数，默认 `open;high;low;close;volume;amount` 和日频前复权设置。
 - `MARKET_DB_HOST` / `MARKET_DB_PORT` / `MARKET_DB_USER` / `MARKET_DB_PASSWORD` / `MARKET_DATA_DB`：云 MySQL 连接信息。
 - `APP_PASSWORD`：自选池添加/删除的管理密码。本地不配置时默认免登录；公开站点的查看、刷新、生成和数据更新不需要登录。
 - `APP_SESSION_SECRET`：登录 cookie 签名密钥，建议使用长随机字符串。

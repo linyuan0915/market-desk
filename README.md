@@ -68,6 +68,26 @@ mysql -u root -p < sql/schema.sql
 
 需要的环境变量见 `.env.example`。
 
+## 数据源优先级
+
+- 市场宽度继续使用大盘云图 skill，不改动。
+- 历史行情优先使用 iFinD 同花顺量化 API：`THS_iFinDLogin` + `THS_HistoryQuotes`。
+- 本机或云端未安装 iFinD Python SDK 时，会自动回退到 RssCast、Yahoo、akshare 和公开行情接口，网页不会因为 iFinD 不可用而崩溃。
+- iFinD 账号密码只放在 `.env.local` 或部署平台环境变量中，不写入代码、不提交 Git。
+
+本地 `.env.local` 示例：
+
+```bash
+IFIND_USERNAME=your_username
+IFIND_PASSWORD=your_password
+```
+
+安装 iFinD Python SDK 后，可用健康检查确认状态：
+
+```bash
+curl http://127.0.0.1:8000/api/health
+```
+
 ## 部署
 
 正式部署建议使用 Render、Railway、Fly.io 或 VPS。详细步骤见 `DEPLOY.md`。
