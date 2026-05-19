@@ -73,6 +73,7 @@ mysql -u root -p < sql/schema.sql
 - 市场宽度继续使用大盘云图 skill，不改动。
 - 历史行情优先使用 iFinD 同花顺量化 API：`THS_iFinDLogin` + `THS_HistoryQuotes`。
 - 本机或云端未安装 iFinD Python SDK 时，会自动回退到 RssCast、Yahoo、akshare 和公开行情接口，网页不会因为 iFinD 不可用而崩溃。
+- 同花顺公开文档显示 SDK 主要提供 Windows、Linux、ARM64 包；macOS 推荐走 HTTP 接口。如果要在本机 macOS 直接 import `iFinDPy`，需要同花顺提供专门的 macOS Python SDK。
 - iFinD 账号密码只放在 `.env.local` 或部署平台环境变量中，不写入代码、不提交 Git。
 
 本地 `.env.local` 示例：

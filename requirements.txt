@@ -5,3 +5,4 @@ python-docx>=1.1
 pymysql>=1.1
 cryptography>=42
 akshare>=1.16
+iFinDAPI>=0.0.8; platform_system != "Darwin"

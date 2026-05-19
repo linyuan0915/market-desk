@@ -8,7 +8,7 @@
 4. 实时港股：可评估麦蕊 API，但 licence 必须放环境变量，不写入代码。
 5. 美股：Alpaca 适合正式行情和交易接口，但需要 API Key；`robin_stocks` 可作为资讯/热度辅助，不建议作为核心行情源。
 
-当前 macOS 本机已安装 PyPI `iFinDAPI`，但该包只包含 Linux/Windows 动态库，不能在 macOS Python 中直接 import `iFinDPy`。如需本机直连，需要同花顺提供 macOS 版 Python SDK；如部署到 Linux 云服务器，可直接使用当前 iFinD 适配层。
+当前 macOS 本机已安装 PyPI `iFinDAPI`，但该包只包含 Linux/Windows 动态库，不能在 macOS Python 中直接 import `iFinDPy`。同花顺官方文档显示 macOS 可走 HTTP 接口；如需本机直连 SDK，需要同花顺提供 macOS 版 Python SDK。如部署到 Linux 云服务器，可直接使用当前 iFinD 适配层。
 
 ## 页面收敛方向
 
