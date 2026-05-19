@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bullseye
 
 WORKDIR /app
 
@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED=1
 
 COPY requirements.txt /app/requirements.txt
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libc6 libgcc-s1 libgomp1 libstdc++6 \
+    && apt-get install -y --no-install-recommends libc6 libgcc-s1 libgomp1 libidn11 libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
