@@ -190,6 +190,7 @@ def health() -> dict:
             "ifind": {
                 "credentials_configured": bool(IFIND_USERNAME and IFIND_PASSWORD),
                 "sdk_available": bool(_ifind_module()),
+                "sdk_diagnostics": _ifind_module_diagnostics(),
                 "priority": "historical A-share data" if IFIND_USERNAME and IFIND_PASSWORD else "not configured",
             }
         },
@@ -1029,6 +1030,22 @@ def _ifind_module():
         except (ImportError, OSError):
             continue
     return None
+
+
+def _ifind_module_diagnostics() -> list[dict]:
+    diagnostics = []
+    for module_name in ("iFinDPy", "THS_iFinD"):
+        spec = importlib.util.find_spec(module_name)
+        item = {"module": module_name, "found": bool(spec), "origin": getattr(spec, "origin", None)}
+        try:
+            importlib.import_module(module_name)
+            item["importable"] = True
+        except Exception as error:
+            item["importable"] = False
+            item["error_type"] = type(error).__name__
+            item["error"] = str(error)[:500]
+        diagnostics.append(item)
+    return diagnostics
 
 
 def _ifind_login(module) -> None:
