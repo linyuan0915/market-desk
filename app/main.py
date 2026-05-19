@@ -455,6 +455,11 @@ def data_refresh_job(job_id: str) -> JSONResponse:
     return JSONResponse(job)
 
 
+@app.get("/api/ifind-test")
+def ifind_test() -> JSONResponse:
+    return JSONResponse(_safe_ifind_test_payload())
+
+
 @app.get("/api/desk")
 def morning_desk(request: Request, refresh: bool = False) -> JSONResponse:
     return JSONResponse(_cached_payload("desk", _morning_desk_payload, refresh=refresh))
@@ -848,7 +853,8 @@ def _refresh_a_share_indices_to_sql(connection) -> dict:
         suffix_map = {item["code"]: item.get("db_code", item["code"]) for item in INDEX_META}
         count = _upsert_market_rows(connection, _normalize_rsscast_history_rows(rows, meta, "A股指数", suffix_map))
         warnings = [ifind_warning] if ifind_warning and "失败" in ifind_warning else []
-        return {"name": "A股指数", "ok": True, "source": "RssCast StockIndexKLineQuery", "start_date": start_date.isoformat(), "end_date": end_date.isoformat(), "rows_upserted": count, "warnings": warnings}
+        source = "RssCast StockIndexKLineQuery (iFinD fallback)" if warnings else "RssCast StockIndexKLineQuery"
+        return {"name": "A股指数", "ok": True, "source": source, "start_date": start_date.isoformat(), "end_date": end_date.isoformat(), "rows_upserted": count, "warnings": warnings}
     except Exception as error:
         warnings = [message for message in [ifind_warning, str(error)] if message]
         return {"name": "A股指数", "ok": False, "source": "iFinD/RssCast", "rows_upserted": 0, "warnings": warnings}
@@ -914,7 +920,7 @@ def _refresh_a_share_stocks_to_sql(connection) -> dict:
     return {
         "name": "A股个股",
         "ok": not warnings,
-        "source": "RssCast StockKLineQuery",
+        "source": "RssCast StockKLineQuery (iFinD fallback)" if warnings else "RssCast StockKLineQuery",
         "symbols": len(symbols),
         "scope": "自选池",
         "start_date": min((item["start_date"] for item in symbols), default=end_date).isoformat(),
@@ -1073,6 +1079,42 @@ def _ifind_login(module) -> None:
         raise RuntimeError(f"iFinD 登录失败，错误码 {getattr(result, 'errorcode')}")
 
 
+def _safe_ifind_test_payload() -> dict:
+    started_at = datetime.now(TZ)
+    try:
+        if not _ifind_configured():
+            return {
+                "ok": False,
+                "source": "iFinD",
+                "message": "iFinD 账号密码未配置或 SDK 不可用。",
+                "health": _ifind_health_status(),
+            }
+        rows = _ifind_history_rows(
+            [INDEX_META[0]],
+            started_at.date() - timedelta(days=7),
+            started_at.date(),
+            market="A股指数",
+            code_key="ifind_code",
+            db_code_key="db_code",
+        )
+        return {
+            "ok": True,
+            "source": "iFinD THS_HistoryQuotes",
+            "message": f"iFinD 实际取数成功，返回 {len(rows)} 行。",
+            "sample": rows[-3:],
+            "health": _ifind_health_status(),
+            "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+        }
+    except Exception as error:
+        return {
+            "ok": False,
+            "source": "iFinD THS_HistoryQuotes",
+            "message": str(error),
+            "health": _ifind_health_status(),
+            "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+        }
+
+
 def _ifind_history_rows(
     symbols: list[dict],
     start_date: date,
@@ -1089,8 +1131,14 @@ def _ifind_history_rows(
     if not history:
         raise RuntimeError("未找到 THS_HistoryQuotes，请确认 iFinD Python SDK 版本")
 
-    codes = [str(item.get(code_key) or item.get("code") or "") for item in symbols]
-    code_to_meta = {str(item.get(code_key) or item.get("code") or ""): item for item in symbols}
+    codes = [str(item.get(code_key) or item.get("code") or "").upper() for item in symbols]
+    code_to_meta = {}
+    for item in symbols:
+        source_code = str(item.get(code_key) or item.get("code") or "").upper()
+        db_code = str(item.get(db_code_key) or item.get("code") or source_code).upper()
+        for candidate in {source_code, db_code, source_code.replace(".SS", ".SH")}:
+            if candidate:
+                code_to_meta[candidate] = item
     result = history(
         ",".join(codes),
         IFIND_HISTORY_FIELDS,
@@ -1101,13 +1149,13 @@ def _ifind_history_rows(
     raw_rows = _ifind_result_to_records(result)
     rows = []
     previous_close_by_code: dict[str, float] = {}
-    for raw in sorted(raw_rows, key=lambda item: (str(item.get("thscode") or item.get("code") or ""), str(item.get("time") or item.get("date") or ""))):
-        source_code = str(raw.get("thscode") or raw.get("code") or raw.get("thsCode") or "")
+    for raw in sorted(raw_rows, key=lambda item: (str(_row_value(item, "thscode", "code", "thsCode") or ""), str(_row_value(item, "time", "date") or ""))):
+        source_code = str(_row_value(raw, "thscode", "code", "thsCode", "securityCode") or "").upper()
         meta = code_to_meta.get(source_code)
         if not meta:
             continue
-        trade_date = _parse_date_value(raw.get("time") or raw.get("date") or raw.get("datetime"))
-        close = _to_float_or_none(raw.get("close"))
+        trade_date = _parse_date_value(_row_value(raw, "time", "date", "datetime", "tradeDate"))
+        close = _to_float_or_none(_row_value(raw, "close", "CLOSE", "ths_close_price_stock"))
         if not trade_date or close is None:
             continue
         db_code = str(meta.get(db_code_key) or meta.get("code") or source_code)
@@ -1124,11 +1172,11 @@ def _ifind_history_rows(
                 "close": close,
                 "change": change,
                 "change_pct": change_pct,
-                "volume": _to_float_or_none(raw.get("volume") or raw.get("vol")),
-                "amount": _to_float_or_none(raw.get("amount") or raw.get("amt")),
-                "open": _to_float_or_none(raw.get("open")),
-                "high": _to_float_or_none(raw.get("high")),
-                "low": _to_float_or_none(raw.get("low")),
+                "volume": _to_float_or_none(_row_value(raw, "volume", "vol", "VOLUME", "ths_vol_stock")),
+                "amount": _to_float_or_none(_row_value(raw, "amount", "amt", "AMOUNT", "ths_amt_stock")),
+                "open": _to_float_or_none(_row_value(raw, "open", "OPEN", "ths_open_price_stock")),
+                "high": _to_float_or_none(_row_value(raw, "high", "HIGH", "ths_high_price_stock")),
+                "low": _to_float_or_none(_row_value(raw, "low", "LOW", "ths_low_stock")),
             }
         )
     if not rows:
@@ -1151,13 +1199,20 @@ def _ifind_result_to_records(result) -> list[dict]:
             records.extend(_ifind_table_to_records(table))
         return records
     if isinstance(result, dict):
+        errorcode = result.get("errorcode", result.get("errorCode", result.get("code")))
+        if errorcode not in (None, 0, "0"):
+            raise RuntimeError(f"iFinD 返回错误码 {errorcode}: {result.get('errmsg') or result.get('message') or ''}")
         if isinstance(result.get("tables"), list):
             records = []
             for table in result["tables"]:
                 records.extend(_ifind_table_to_records(table))
             return records
+        if isinstance(result.get("tables"), dict):
+            return _ifind_table_to_records(result["tables"])
         if isinstance(result.get("data"), list):
             return [row for row in result["data"] if isinstance(row, dict)]
+        if isinstance(result.get("data"), dict):
+            return _ifind_table_to_records(result["data"])
     raise RuntimeError("无法解析 iFinD 返回结构")
 
 
@@ -1168,12 +1223,65 @@ def _ifind_table_to_records(table) -> list[dict]:
         except TypeError:
             pass
     if isinstance(table, dict):
+        table_code = table.get("thscode") or table.get("code") or table.get("thsCode")
         rows = table.get("table") or table.get("data") or []
         if isinstance(rows, list):
-            return [row for row in rows if isinstance(row, dict)]
+            output = []
+            for row in rows:
+                if isinstance(row, dict):
+                    merged = {"thscode": table_code, **row} if table_code and "thscode" not in row else row
+                    output.append(merged)
+            return output
+        if isinstance(rows, dict):
+            return _ifind_columnar_rows(rows, table_code=table_code, table_time=table.get("time"))
+        return _ifind_columnar_rows(table)
     if isinstance(table, list):
         return [row for row in table if isinstance(row, dict)]
     return []
+
+
+def _ifind_columnar_rows(columns: dict, table_code=None, table_time=None) -> list[dict]:
+    list_values = {
+        str(key): value
+        for key, value in columns.items()
+        if isinstance(value, list)
+    }
+    if not list_values:
+        return []
+    row_count = max(len(value) for value in list_values.values())
+    output = []
+    for index in range(row_count):
+        row = {}
+        if table_code:
+            row["thscode"] = table_code
+        if isinstance(table_time, list) and index < len(table_time):
+            row["time"] = table_time[index]
+        for key, values in list_values.items():
+            if index < len(values):
+                row[key] = values[index]
+        output.append(row)
+    return output
+
+
+def _row_value(row: dict, *keys: str):
+    for key in keys:
+        if key in row:
+            return row.get(key)
+    lower_map = {str(key).lower(): value for key, value in row.items()}
+    for key in keys:
+        value = lower_map.get(key.lower())
+        if value is not None:
+            return value
+    normalized = {str(key).lower().replace("_", "").replace("-", ""): value for key, value in row.items()}
+    for key in keys:
+        needle = key.lower().replace("_", "").replace("-", "")
+        value = normalized.get(needle)
+        if value is not None:
+            return value
+        for existing_key, existing_value in normalized.items():
+            if existing_key.endswith(needle):
+                return existing_value
+    return None
 
 
 def _latest_symbol_date(connection, code: str) -> date | None:
