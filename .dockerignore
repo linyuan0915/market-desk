@@ -17,6 +17,7 @@ output/*
 !output/market_breadth_heatmap.png
 !output/raw_data.json
 !output/aggregated_data.json
+!output/daily_brief_snapshot.json
 *.db
 *.sqlite
 *.sqlite3

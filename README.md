@@ -26,6 +26,38 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 http://127.0.0.1:8000
 ```
 
+如果只是想启动本机网页，可以直接运行：
+
+```bash
+./scripts/start_local_server.sh
+```
+
+后台运行并自动守护端口，适合日常使用：
+
+```bash
+./scripts/run_local_server_background.sh
+```
+
+停止后台服务：
+
+```bash
+./scripts/stop_local_server.sh
+```
+
+在 macOS 上也可以安装 LaunchAgent，让本机登录后自动保持 `http://127.0.0.1:8000` 可访问：
+
+```bash
+./scripts/install_local_launch_agent.sh
+```
+
+如果项目放在 Desktop、Documents 等受 macOS 隐私权限保护的位置，LaunchAgent 可能被系统拦截；这种情况下使用 `./scripts/run_local_server_background.sh` 更稳。
+
+取消常驻服务：
+
+```bash
+./scripts/uninstall_local_launch_agent.sh
+```
+
 ## 数据库
 
 初始化 MySQL：
@@ -43,3 +75,11 @@ mysql -u root -p < sql/schema.sql
 ## 安全说明
 
 不要提交 `.env`、数据库 dump、运行输出图片或 token。仓库已通过 `.gitignore` 和 `.dockerignore` 忽略这些文件。
+
+## 回滚
+
+关键修改前保留了本地稳定分支：
+
+```bash
+git switch backup/stable-20260519-1051
+```

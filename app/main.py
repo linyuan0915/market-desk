@@ -30,6 +30,7 @@ STATIC_DIR = ROOT_DIR / "app" / "static"
 OUTPUT_DIR = ROOT_DIR / "output"
 WATCHLIST_PATH = OUTPUT_DIR / "watchlist.json"
 SENTIMENT_HISTORY_PATH = OUTPUT_DIR / "sentiment_history.json"
+DAILY_BRIEF_SNAPSHOT_PATH = OUTPUT_DIR / "daily_brief_snapshot.json"
 SKILL_DIR = Path.home() / ".codex" / "skills" / "market-breadth-heatmap-skill"
 GENERATOR = SKILL_DIR / "scripts" / "generate.py"
 TEMPLATE = SKILL_DIR / "assets" / "heatmap_template.html"
@@ -242,6 +243,9 @@ def refresh(request: Request) -> dict:
 def daily_brief_status() -> JSONResponse:
     docx_path = _latest_daily_brief_docx()
     if not docx_path:
+        snapshot = _daily_brief_snapshot_payload()
+        if snapshot:
+            return JSONResponse(snapshot)
         return JSONResponse(_fallback_daily_brief_payload(generated=False))
     return JSONResponse(_daily_brief_payload(docx_path))
 
@@ -249,6 +253,9 @@ def daily_brief_status() -> JSONResponse:
 @app.post("/api/daily-brief/generate")
 def generate_daily_brief(request: Request) -> JSONResponse:
     if not DAILY_BRIEF_BUILD_SCRIPT.exists():
+        snapshot = _daily_brief_snapshot_payload(generated=True)
+        if snapshot:
+            return JSONResponse(snapshot)
         return JSONResponse(_fallback_daily_brief_payload(generated=True))
     completed = subprocess.run(
         ["python3", str(DAILY_BRIEF_BUILD_SCRIPT)],
@@ -265,7 +272,9 @@ def generate_daily_brief(request: Request) -> JSONResponse:
     docx_path = _latest_daily_brief_docx()
     if not docx_path:
         return JSONResponse({"ok": False, "message": "构建完成但未找到输出 Word。"}, status_code=500)
-    return JSONResponse({"ok": True, "build_log": completed.stdout, **_daily_brief_payload(docx_path)})
+    payload = _daily_brief_payload(docx_path)
+    _write_daily_brief_snapshot(payload, docx_path)
+    return JSONResponse({"ok": True, "build_log": completed.stdout, **payload})
 
 
 @app.get("/api/daily-brief/download")
@@ -2895,6 +2904,33 @@ def _daily_brief_payload(docx_path: Path) -> dict:
         "generated_at": datetime.fromtimestamp(docx_path.stat().st_mtime, TZ).isoformat(timespec="seconds"),
         "skill": str(DAILY_BRIEF_SKILL_DIR),
     }
+
+
+def _daily_brief_snapshot_payload(generated: bool = False) -> dict | None:
+    if not DAILY_BRIEF_SNAPSHOT_PATH.exists():
+        return None
+    try:
+        payload = json.loads(DAILY_BRIEF_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    payload["ok"] = True
+    payload["exists"] = True
+    payload["docx_path"] = None
+    payload["download_url"] = None
+    payload["skill"] = payload.get("skill") or "daily-market-brief snapshot"
+    if generated:
+        payload["message"] = "公开网页已加载本地生成的每日简报快照。"
+    return payload
+
+
+def _write_daily_brief_snapshot(payload: dict, docx_path: Path) -> None:
+    snapshot = dict(payload)
+    snapshot["docx_path"] = None
+    snapshot["download_url"] = None
+    snapshot["skill"] = "daily-market-brief snapshot"
+    snapshot["source_docx_name"] = docx_path.name
+    snapshot["snapshot_generated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    DAILY_BRIEF_SNAPSHOT_PATH.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _fallback_daily_brief_payload(generated: bool = False) -> dict:
