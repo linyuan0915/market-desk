@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from urllib.parse import unquote, urlparse
 
 import requests
 from fastapi import Body, FastAPI, HTTPException, Request, Response
@@ -182,6 +183,7 @@ def health() -> dict:
             connection.close()
     except Exception as error:
         database = {"ok": False, "message": str(error)}
+    database["connection"] = _mysql_connection_info()
     return {
         "ok": database["ok"],
         "app": "market-desk",
@@ -739,17 +741,55 @@ def _mysql_identifier(name: str) -> str:
 def _mysql_connection(database: str | None = MARKET_DATA_DB):
     import pymysql
 
-    kwargs = dict(
-        host=os.environ.get("MARKET_DB_HOST", "127.0.0.1"),
-        port=int(os.environ.get("MARKET_DB_PORT", "3306")),
-        user=os.environ.get("MARKET_DB_USER", "root"),
-        password=os.environ.get("MARKET_DB_PASSWORD", ""),
-        charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-    )
+    kwargs = _mysql_connection_kwargs(database)
+    kwargs.update(charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor, connect_timeout=10, read_timeout=30, write_timeout=30)
+    return pymysql.connect(**kwargs)
+
+
+def _mysql_connection_kwargs(database: str | None = MARKET_DATA_DB) -> dict:
+    url = _mysql_database_url()
+    if url:
+        parsed = urlparse(url)
+        path_database = unquote(parsed.path.lstrip("/")) if parsed.path else ""
+        kwargs = {
+            "host": parsed.hostname or "127.0.0.1",
+            "port": parsed.port or 3306,
+            "user": unquote(parsed.username or "root"),
+            "password": unquote(parsed.password or ""),
+        }
+        if database or path_database:
+            kwargs["database"] = database or path_database
+        return kwargs
+    kwargs = {
+        "host": os.environ.get("MARKET_DB_HOST", "127.0.0.1"),
+        "port": int(os.environ.get("MARKET_DB_PORT", "3306")),
+        "user": os.environ.get("MARKET_DB_USER", "root"),
+        "password": os.environ.get("MARKET_DB_PASSWORD", ""),
+    }
     if database:
         kwargs["database"] = database
-    return pymysql.connect(**kwargs)
+    return kwargs
+
+
+def _mysql_database_url() -> str:
+    for key in ("MYSQL_URL", "DATABASE_URL", "MYSQL_PUBLIC_URL", "RAILWAY_MYSQL_URL"):
+        value = os.environ.get(key)
+        if value and value.startswith(("mysql://", "mysql2://")):
+            return value
+    return ""
+
+
+def _mysql_connection_info() -> dict:
+    kwargs = _mysql_connection_kwargs(MARKET_DATA_DB)
+    url_key = next((key for key in ("MYSQL_URL", "DATABASE_URL", "MYSQL_PUBLIC_URL", "RAILWAY_MYSQL_URL") if os.environ.get(key)), None)
+    return {
+        "mode": "url" if _mysql_database_url() else "host_fields",
+        "url_variable": url_key,
+        "host": kwargs.get("host"),
+        "port": kwargs.get("port"),
+        "user": kwargs.get("user"),
+        "database": kwargs.get("database"),
+    }
 
 
 def _market_db_connection():
