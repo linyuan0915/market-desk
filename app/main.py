@@ -672,6 +672,7 @@ def _run_data_refresh_job(job_id: str) -> None:
             tasks.append(result)
             warnings.extend(result.get("warnings", []))
             _update_data_refresh_job(job_id, progress=progress, message=f"{task_name}更新完成。", tasks=tasks, warnings=warnings[:20])
+        backfilled = _backfill_change_fields(connection)
         coverage = _sql_coverage_snapshot(connection)
     except Exception as error:
         warnings.append(str(error))
@@ -687,6 +688,7 @@ def _run_data_refresh_job(job_id: str) -> None:
         "duration_seconds": round((datetime.now(TZ) - started_at).total_seconds(), 1),
         "message": f"数据更新完成，写入/更新 {inserted} 行。" if ok else "数据更新部分完成，存在数据源失败。",
         "rows_upserted": inserted,
+        "change_fields_backfilled": backfilled if "backfilled" in locals() else 0,
         "tasks": tasks,
         "warnings": warnings,
         "coverage": coverage,
@@ -834,6 +836,60 @@ def _ensure_market_schema() -> None:
         connection.close()
 
 
+def _backfill_change_fields(connection, markets: tuple[str, ...] | None = None) -> int:
+    change_column = _daily_data_change_column(connection)
+    where_sql = ""
+    params: list = []
+    if markets:
+        placeholders = ", ".join(["%s"] * len(markets))
+        where_sql = f"WHERE market IN ({placeholders})"
+        params.extend(markets)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT date, code, market, close, {change_column} AS change_amount, change_pct
+            FROM daily_data
+            {where_sql}
+            ORDER BY market, code, date
+            """,
+            params,
+        )
+        rows = cursor.fetchall()
+    updates = []
+    previous_by_symbol: dict[tuple[str, str], dict] = {}
+    for row in rows:
+        key = (str(row.get("market")), str(row.get("code")))
+        close = _to_float_or_none(row.get("close"))
+        previous = previous_by_symbol.get(key)
+        if close is None:
+            continue
+        if previous and previous.get("close"):
+            previous_close = float(previous["close"])
+            change_amount = _to_float_or_none(row.get("change_amount"))
+            change_pct = _to_float_or_none(row.get("change_pct"))
+            if change_amount is None:
+                change_amount = close - previous_close
+            if change_pct is None:
+                change_pct = (close / previous_close - 1) * 100 if previous_close else None
+            if change_amount is not None or change_pct is not None:
+                updates.append((change_amount, change_pct, row.get("date"), row.get("code"), row.get("market")))
+        previous_by_symbol[key] = row
+    if not updates:
+        return 0
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            f"""
+            UPDATE daily_data
+            SET {change_column} = COALESCE({change_column}, %s),
+                change_pct = COALESCE(change_pct, %s)
+            WHERE date = %s AND code = %s AND market = %s
+            """,
+            updates,
+        )
+    connection.commit()
+    return len(updates)
+
+
 def _data_refresh_payload() -> dict:
     started_at = datetime.now(TZ)
     tasks = []
@@ -852,6 +908,7 @@ def _data_refresh_payload() -> dict:
         tasks.append(_refresh_a_share_indices_to_sql(connection))
         tasks.append(_refresh_a_share_stocks_to_sql(connection))
         tasks.append(_refresh_yahoo_markets_to_sql(connection))
+        backfilled = _backfill_change_fields(connection)
         coverage = _sql_coverage_snapshot(connection)
     finally:
         connection.close()
@@ -865,6 +922,7 @@ def _data_refresh_payload() -> dict:
         "duration_seconds": round((datetime.now(TZ) - started_at).total_seconds(), 1),
         "message": f"数据更新完成，写入/更新 {inserted} 行。" if ok else "数据更新部分完成，存在数据源失败。",
         "rows_upserted": inserted,
+        "change_fields_backfilled": backfilled if "backfilled" in locals() else 0,
         "tasks": tasks,
         "warnings": warnings,
         "coverage": coverage,
@@ -2422,9 +2480,10 @@ def _coverage_status(row: dict) -> str:
 
 def _coverage_missing_breakdown(row: dict) -> dict[str, int]:
     market = str(row.get("market") or "")
+    natural_first_rows = int(row.get("code_count") or 0)
     missing = {
         "close": int(row.get("missing_close") or 0),
-        "change_pct": max(0, int(row.get("missing_change_pct") or 0) - int(row.get("code_count") or 0)),
+        "change_pct": max(0, int(row.get("missing_change_pct") or 0) - natural_first_rows),
         "amount": int(row.get("missing_amount") or 0),
     }
     if market in {"港股指数", "美股指数", "美股波动率"}:
