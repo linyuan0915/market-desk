@@ -55,7 +55,9 @@ OUTPUT_DIR = ROOT_DIR / "output"
 WATCHLIST_PATH = OUTPUT_DIR / "watchlist.json"
 SENTIMENT_HISTORY_PATH = OUTPUT_DIR / "sentiment_history.json"
 DAILY_BRIEF_SNAPSHOT_PATH = OUTPUT_DIR / "daily_brief_snapshot.json"
-SKILL_DIR = Path.home() / ".codex" / "skills" / "market-breadth-heatmap-skill"
+PACKAGED_SKILL_DIR = ROOT_DIR / "skills" / "market-breadth-heatmap-skill"
+LOCAL_CODEX_SKILL_DIR = Path.home() / ".codex" / "skills" / "market-breadth-heatmap-skill"
+SKILL_DIR = PACKAGED_SKILL_DIR if (PACKAGED_SKILL_DIR / "scripts" / "generate.py").exists() else LOCAL_CODEX_SKILL_DIR
 GENERATOR = SKILL_DIR / "scripts" / "generate.py"
 TEMPLATE = SKILL_DIR / "assets" / "heatmap_template.html"
 DAILY_BRIEF_DIR = ROOT_DIR.parent / "每日简报"
@@ -1732,7 +1734,7 @@ def _data_center_payload() -> dict:
     ifind_health = _ifind_health_status()
     return {
         "available": True,
-        "source": f"MySQL/{MARKET_DATA_DB}.daily_data",
+        "source": _sql_market_source_label(),
         "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
         "coverage": coverage,
         "markets": [_json_safe_row(row) for row in markets],
@@ -1777,7 +1779,7 @@ def _safe_data_center_payload() -> dict:
     except Exception as error:
         return {
             "available": False,
-            "source": f"MySQL/{MARKET_DATA_DB}.daily_data",
+            "source": _sql_market_source_label(),
             "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
             "message": f"数据中心诊断失败：{error}",
             "coverage": {"rows_count": 0, "code_count": 0, "market_count": 0, "min_date": None, "max_date": None},
@@ -1787,6 +1789,31 @@ def _safe_data_center_payload() -> dict:
             "sparse_symbols": [],
             "suggestions": ["请确认云端 daily_data 表结构已自动创建，并执行“一键更新数据”。"],
         }
+
+
+def _ifind_source_label() -> str:
+    health = _ifind_health_status()
+    if health.get("status") == "ready":
+        return "iFinD THS_HistoryQuotes"
+    if health.get("credentials_configured"):
+        return "iFinD 已配置但 SDK 不可用，降级 RssCast"
+    return "RssCast MCP（iFinD 未配置）"
+
+
+def _sql_market_source_label() -> str:
+    return f"MySQL/{MARKET_DATA_DB}.daily_data 缓存（A股优先 {_ifind_source_label()}；港美指数/VIX 使用 Yahoo Finance + akshare 备用）"
+
+
+def _morning_desk_source_label() -> str:
+    return "；".join(
+        [
+            f"A股历史行情：{_ifind_source_label()}",
+            f"行情缓存：MySQL/{MARKET_DATA_DB}.daily_data",
+            "市场宽度：大盘云图 sckd.dapanyuntu.com + 项目内 market-breadth-heatmap skill",
+            "资金/情绪：东方财富、同花顺公开接口与 akshare",
+            "宏观/外围：FRED、Yahoo Finance、akshare、新浪期货",
+        ]
+    )
 
 
 def _morning_desk_payload() -> dict:
@@ -1816,7 +1843,7 @@ def _morning_desk_payload() -> dict:
     conclusion = _desk_conclusion(desk_score, cards)
     return {
         "available": True,
-        "source": "SQL + RssCast + market-breadth + Eastmoney/THS/AkShare + FRED/Yahoo",
+        "source": _morning_desk_source_label(),
         "generated_at": generated_at,
         "score": desk_score,
         "conclusion": conclusion,
@@ -1948,7 +1975,7 @@ def _desk_conclusion(score: int, cards: list[dict]) -> dict:
         title = "早盘环境偏谨慎，先控风险再看修复。"
     analysis = [
         f"综合分 {score}/100，最强信号来自{strongest.get('title', '-')}，最弱约束来自{weakest.get('title', '-')}。",
-        "页面刷新会优先更新本地 SQL 的 A 股、港美指数和 VIX，再读取在线资金、宏观和情绪接口。",
+        f"页面刷新会优先把 A股历史行情写入 SQL（当前：{_ifind_source_label()}），再读取港美指数/VIX、在线资金、宏观和情绪接口。",
         "如果某个数据源失败，卡片会保留来源和原因，不用旧数据冒充新判断。",
     ]
     return {"title": title, "analysis": analysis}
@@ -1973,7 +2000,7 @@ def _cross_market_risk_payload() -> dict:
     try:
         connection = _market_db_connection()
     except Exception as error:
-        return {"available": False, "source": f"MySQL/{MARKET_DATA_DB}", "message": f"无法连接本地数据库：{error}"}
+        return {"available": False, "source": _sql_market_source_label(), "message": f"无法连接本地数据库：{error}"}
     try:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -1991,7 +2018,7 @@ def _cross_market_risk_payload() -> dict:
     if not rows:
         return {
             "available": False,
-            "source": f"MySQL/{MARKET_DATA_DB}.daily_data",
+            "source": _sql_market_source_label(),
             "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
             "trade_date": None,
             "risk": {"score": None, "state": "等待数据"},
@@ -2010,7 +2037,7 @@ def _cross_market_risk_payload() -> dict:
     risk = _risk_score_from_cross_market(latest, history_by_code)
     return {
         "available": True,
-        "source": f"MySQL/{MARKET_DATA_DB}.daily_data",
+        "source": _sql_market_source_label(),
         "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
         "trade_date": max((row["date"] for row in latest), default=None),
         "risk": risk,
@@ -2026,7 +2053,7 @@ def _safe_cross_market_risk_payload() -> dict:
     except Exception as error:
         return {
             "available": False,
-            "source": f"MySQL/{MARKET_DATA_DB}.daily_data",
+            "source": _sql_market_source_label(),
             "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
             "trade_date": None,
             "risk": {"score": None, "state": "风险面板暂不可用"},

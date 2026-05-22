@@ -12,6 +12,7 @@ RUN apt-get update \
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app /app/app
+COPY skills /app/skills
 COPY output /app/output
 
 EXPOSE 8000

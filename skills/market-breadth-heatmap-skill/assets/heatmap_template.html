@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080">
+<title>市场宽度热力图</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 1080px;
+    height: 1440px;
+    overflow: hidden;
+    background: #f0f2f5;
+    font-family: 'Noto Sans SC', sans-serif;
+  }
+
+  .card {
+    width: 1080px;
+    height: 1440px;
+    background: #ffffff;
+    padding: 44px 38px 32px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: none;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #818cf8, #38bdf8, #34d399, #fbbf24, #fb923c);
+  }
+
+  .header { flex-shrink: 0; margin-bottom: 16px; }
+  .header-top { display: flex; justify-content: space-between; align-items: flex-start; }
+
+  .title {
+    font-size: 32px; font-weight: 900; color: #1e293b;
+    letter-spacing: 0.5px; line-height: 1.3;
+  }
+  .title em {
+    font-style: normal;
+    background: linear-gradient(135deg, #6366f1, #0ea5e9);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .meta-row { display: flex; align-items: center; gap: 16px; margin-top: 8px; }
+  .subtitle { font-size: 16px; color: #94a3b8; font-weight: 400; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #f0fdf4; border: 1px solid #bbf7d0;
+    border-radius: 16px; padding: 4px 14px;
+    font-size: 14px; color: #16a34a; font-weight: 500;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .badge-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: #22c55e;
+  }
+
+  .divider {
+    height: 1px; background: linear-gradient(90deg, #e2e8f0, transparent 80%);
+    margin-bottom: 14px; flex-shrink: 0;
+  }
+
+  .heatmap-area {
+    flex: 1; display: flex; flex-direction: column;
+    min-height: 0; position: relative; z-index: 1;
+  }
+
+  .date-row { display: flex; align-items: center; margin-bottom: 4px; padding-left: 96px; }
+  .date-cell {
+    flex: 1; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; color: #94a3b8; line-height: 1;
+  }
+
+  .heatmap-body {
+    flex: 1; display: flex; flex-direction: column;
+    gap: 2px; justify-content: space-between;
+  }
+
+  .h-row { display: flex; align-items: center; gap: 0; flex: 1; min-height: 0; }
+
+  .ind-label {
+    width: 88px; flex-shrink: 0; font-size: 14px; font-weight: 500;
+    color: #64748b; text-align: right; padding-right: 10px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    line-height: 1;
+  }
+
+  .cells { flex: 1; display: flex; gap: 2px; }
+
+  .cell {
+    flex: 1; border-radius: 3px; display: flex; align-items: center;
+    justify-content: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 500;
+    min-width: 0; position: relative;
+  }
+  .cell.empty { background: #f8fafc !important; }
+
+  .legend { flex-shrink: 0; margin-top: 16px; display: flex; align-items: center; gap: 14px; }
+  .legend-text { font-size: 13px; color: #94a3b8; font-weight: 500; }
+  .legend-bar-wrap { flex: 1; }
+  .legend-bar { height: 10px; border-radius: 5px; width: 100%; }
+  .legend-ticks { display: flex; justify-content: space-between; margin-top: 4px; }
+  .legend-tick { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #cbd5e1; }
+
+  .footer {
+    flex-shrink: 0; margin-top: 16px; display: flex;
+    justify-content: space-between; align-items: flex-end;
+    padding-top: 14px; border-top: 1px solid #f1f5f9;
+  }
+  .stats { display: flex; gap: 32px; }
+  .stat { display: flex; flex-direction: column; gap: 2px; }
+  .stat-lbl { font-size: 12px; color: #94a3b8; letter-spacing: 0.5px; }
+  .stat-val { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; line-height: 1.2; }
+  .stat-val.g { color: #16a34a; }
+  .stat-val.r { color: #dc2626; }
+  .stat-val.y { color: #d97706; }
+  .src { font-size: 12px; color: #cbd5e1; text-align: right; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="header">
+    <div class="header-top">
+      <div>
+        <div class="title">市场宽度 · <em>鱼盆热力图</em></div>
+        <div class="meta-row">
+          <span class="subtitle">一级行业 MA20 站上率变化</span>
+          <span class="badge"><span class="badge-dot"></span><span id="badgeDate"></span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="divider"></div>
+
+  <div class="heatmap-area">
+    <div class="date-row" id="dateRow"></div>
+    <div class="heatmap-body" id="heatBody"></div>
+  </div>
+
+  <div class="legend">
+    <span class="legend-text">极弱</span>
+    <div class="legend-bar-wrap">
+      <div class="legend-bar" id="legendBar"></div>
+      <div class="legend-ticks">
+        <span class="legend-tick">0</span>
+        <span class="legend-tick">25</span>
+        <span class="legend-tick">50</span>
+        <span class="legend-tick">75</span>
+        <span class="legend-tick">100</span>
+      </div>
+    </div>
+    <span class="legend-text">极强</span>
+  </div>
+
+  <div class="footer">
+    <div class="stats">
+      <div class="stat">
+        <span class="stat-lbl">最强行业</span>
+        <span class="stat-val g" id="sBest"></span>
+      </div>
+      <div class="stat">
+        <span class="stat-lbl">最弱行业</span>
+        <span class="stat-val r" id="sWorst"></span>
+      </div>
+      <div class="stat">
+        <span class="stat-lbl">全市场均值</span>
+        <span class="stat-val y" id="sAvg"></span>
+      </div>
+    </div>
+    <div class="src">
+      数据来源：大盘云图 dapanyuntu.com<br>
+      每日16:00更新 · 仅供参考
+    </div>
+  </div>
+</div>
+
+<script>
+const D = __DATA__;
+
+function color(v) {
+  if (v == null) return { bg: 'transparent', fg: 'transparent' };
+  v = Math.max(0, Math.min(100, v));
+  let r, g, b;
+  if (v <= 20) {
+    const t = v / 20;
+    r = 224 - t * 38 | 0; g = 231 - t * 1 | 0; b = 255 - t * 6 | 0;
+  } else if (v <= 40) {
+    const t = (v - 20) / 20;
+    r = 186 - t * 5 | 0; g = 230 - t * 17 | 0; b = 249 - t * 36 | 0;
+  } else if (v <= 60) {
+    const t = (v - 40) / 20;
+    r = 181 + t * 72 | 0; g = 237 - t * 3 | 0; b = 208 - t * 69 | 0;
+  } else if (v <= 80) {
+    const t = (v - 60) / 20;
+    r = 253 + t * 0 | 0; g = 240 - t * 62 | 0; b = 138 - t * 50 | 0;
+  } else {
+    const t = (v - 80) / 20;
+    r = 253 - t * 2 | 0; g = 178 - t * 36 | 0; b = 88 - t * 28 | 0;
+  }
+  const bg = `rgb(${r},${g},${b})`;
+  const lum = (r * 299 + g * 587 + b * 114) / 1000;
+  const fg = lum > 180 ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.7)';
+  return { bg, fg };
+}
+
+(function render() {
+  const { categories: cats, dates, data } = D;
+  const n = dates.length;
+  document.getElementById('badgeDate').textContent = dates[n - 1] + ' 收盘';
+
+  const dr = document.getElementById('dateRow');
+  dr.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const dc = document.createElement('div');
+    dc.className = 'date-cell';
+    const show = i % 5 === 0 || i === n - 1;
+    dc.textContent = show ? dates[i].slice(5).replace('-', '/') : '';
+    dc.style.visibility = show ? 'visible' : 'hidden';
+    dr.appendChild(dc);
+  }
+
+  const body = document.getElementById('heatBody');
+  body.innerHTML = '';
+  cats.forEach(cat => {
+    const row = document.createElement('div');
+    row.className = 'h-row';
+    const lbl = document.createElement('div');
+    lbl.className = 'ind-label'; lbl.textContent = cat;
+    row.appendChild(lbl);
+    const cells = document.createElement('div');
+    cells.className = 'cells';
+    const vals = data[cat];
+    for (let i = 0; i < n; i++) {
+      const c = document.createElement('div');
+      const v = vals[i];
+      if (v == null) { c.className = 'cell empty'; }
+      else {
+        const { bg, fg } = color(v);
+        c.className = 'cell'; c.style.background = bg; c.style.color = fg;
+        c.textContent = Math.round(v);
+      }
+      cells.appendChild(c);
+    }
+    row.appendChild(cells);
+    body.appendChild(row);
+  });
+
+  const stops = [];
+  for (let i = 0; i <= 20; i++) { const { bg } = color(i * 5); stops.push(`${bg} ${(i / 20 * 100).toFixed(1)}%`); }
+  document.getElementById('legendBar').style.background = `linear-gradient(90deg, ${stops.join(',')})`;
+
+  const last = cats.map(c => ({ c, v: data[c][n - 1] || 0 }));
+  last.sort((a, b) => b.v - a.v);
+  document.getElementById('sBest').textContent = last[0].c + ' ' + last[0].v.toFixed(1);
+  document.getElementById('sWorst').textContent = last[last.length - 1].c + ' ' + last[last.length - 1].v.toFixed(1);
+  const avg = (last.reduce((s, x) => s + x.v, 0) / last.length).toFixed(1);
+  document.getElementById('sAvg').textContent = avg + '%';
+})();
+</script>
+</body>
+</html>
