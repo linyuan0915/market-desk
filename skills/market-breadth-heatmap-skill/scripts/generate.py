@@ -12,6 +12,7 @@
 import argparse
 import json
 import os
+import shutil
 import sys
 import urllib.request
 from collections import defaultdict
@@ -137,6 +138,10 @@ def capture_html(html_path, output_path, width=1080, height=1440, dpr=2):
     if not os.path.exists(capture_js):
         print(f"错误: capture.js 不存在 {capture_js}")
         print("请运行: npm install && npx playwright install chromium")
+        return None
+
+    if not shutil.which("node"):
+        print("警告: 未找到 node，已跳过 PNG 截图；JSON 和 HTML 已更新。")
         return None
     
     print(f"正在截图: {html_path} -> {output_path} ({width}x{height}, {dpr}x DPR)")

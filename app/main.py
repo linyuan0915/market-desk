@@ -499,22 +499,49 @@ def generate_heatmap() -> dict:
     if not GENERATOR.exists():
         raise RuntimeError(f"未找到 skill 生成脚本: {GENERATOR}")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    cmd = [
+    raw_path = OUTPUT_DIR / "raw_data.json"
+    aggregated_path = OUTPUT_DIR / "aggregated_data.json"
+    html_path = OUTPUT_DIR / "market_breadth_heatmap.html"
+    png_path = OUTPUT_DIR / "market_breadth_heatmap.png"
+    steps = [
+        ["--mode", "fetch", "--output", str(raw_path)],
+        ["--mode", "aggregate", "--input", str(raw_path), "--output", str(aggregated_path)],
+        ["--mode", "render", "--input", str(aggregated_path), "--template", str(TEMPLATE), "--output", str(html_path)],
+    ]
+    logs = []
+    for step in steps:
+        cmd = ["python3", str(GENERATOR), *step]
+        completed = subprocess.run(cmd, cwd=SKILL_DIR, capture_output=True, text=True, timeout=120)
+        logs.append(completed.stdout)
+        if completed.returncode != 0:
+            raise RuntimeError(completed.stderr or completed.stdout)
+
+    capture_warning = None
+    capture_cmd = [
         "python3",
         str(GENERATOR),
         "--mode",
-        "all",
-        "--output-dir",
-        str(OUTPUT_DIR),
+        "capture",
+        "--input",
+        str(html_path),
+        "--output",
+        str(png_path),
         "--width",
         "1080",
         "--height",
         "1440",
     ]
-    completed = subprocess.run(cmd, cwd=SKILL_DIR, capture_output=True, text=True, timeout=120)
+    completed = subprocess.run(capture_cmd, cwd=SKILL_DIR, capture_output=True, text=True, timeout=120)
+    logs.append(completed.stdout)
     if completed.returncode != 0:
-        raise RuntimeError(completed.stderr or completed.stdout)
-    return {"ok": True, "message": completed.stdout}
+        capture_warning = completed.stderr or completed.stdout or "PNG 截图失败，但市场宽度数据已更新。"
+    elif "跳过 PNG 截图" in completed.stdout or "截图失败" in completed.stdout:
+        capture_warning = "云端缺少 Node/Playwright，已跳过 PNG 截图；交互式市场宽度数据已更新。"
+
+    payload = {"ok": True, "message": "\n".join(log for log in logs if log)}
+    if capture_warning:
+        payload["warning"] = capture_warning
+    return payload
 
 
 def _cached_payload(key: str, builder, refresh: bool = False, ttl: int = CACHE_TTL_SECONDS) -> dict:
